@@ -1012,7 +1012,7 @@ class ContentService {
       const item = current.rows[0];
       if (!item) throw new NotFoundException("عنصر المحتوى غير موجود");
       if (!canDeleteContentStatus(item.status) || item.wordpressPostId) {
-        throw new BadRequestException("لا يمكن حذف محتوى منشور أو معتمد أو مجدول. عطّل النشر أو اتركه في السجل التشغيلي.");
+        throw new BadRequestException("لا يمكن حذف محتوى منشور أو مجدول أو لديه مهمة لم تكتمل. اسحب النشر أولًا إذا كان منشورًا.");
       }
       const inFlight = await query<{ count: string }>(
         `SELECT COUNT(*)::text AS count
@@ -1062,7 +1062,7 @@ class ContentService {
         continue;
       }
       if (!canDeleteContentStatus(item.status) || item.wordpressPostId) {
-        skipped.push({ id, reason: "منشور أو معتمد أو مجدول" });
+        skipped.push({ id, reason: "منشور أو مجدول أو لديه مهمة لم تكتمل" });
         continue;
       }
       const jobs = await this.db.query<{ id: string; queueName: string; bullJobId: string }>(
@@ -1600,7 +1600,7 @@ export function assertActiveContentSite(status: string): void {
 }
 
 export function canDeleteContentStatus(status: ContentState): boolean {
-  return !["QUEUED", "APPROVED", "SCHEDULED", "PUBLISHED"].includes(status);
+  return !["QUEUED", "SCHEDULED", "PUBLISHED"].includes(status);
 }
 
 function toPublicContentRow(row: ContentRow): Record<string, unknown> {

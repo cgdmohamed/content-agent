@@ -28,6 +28,7 @@ export function ContentLibrary(): ReactElement {
   const [updatedTo, setUpdatedTo] = useState("");
   const [needsAttentionOnly, setNeedsAttentionOnly] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogConfig | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const contentFilters = {
@@ -324,7 +325,12 @@ export function ContentLibrary(): ReactElement {
             <IconButton
               icon={RotateCcw}
               disabled={selectedCount === 0 || rollbackPublishing.isPending}
-              onClick={() => confirmBulkRollback(selectedCount) && rollbackPublishing.mutate(selectedIds)}
+              onClick={() => setConfirmDialog({
+                title: "سحب/إلغاء النشر",
+                message: `سيتم سحب المنشور من ووردبريس إلى مسودة وإلغاء جدولة المجدول لعدد ${selectedCount} عنصر محدد.`,
+                confirmLabel: "تأكيد التراجع",
+                onConfirm: () => rollbackPublishing.mutate([...selectedIds])
+              })}
             >
               {rollbackPublishing.isPending ? "جاري التراجع..." : "سحب/إلغاء النشر"}
             </IconButton>
@@ -332,7 +338,13 @@ export function ContentLibrary(): ReactElement {
               icon={Trash2}
               tone="danger"
               disabled={selectedCount === 0 || cleanupContent.isPending}
-              onClick={() => confirmBulkCleanup(selectedCount) && cleanupContent.mutate(selectedIds)}
+              onClick={() => setConfirmDialog({
+                title: "حذف العناصر المحددة",
+                message: `سيتم إلغاء المهام المنتظرة وحذف ${selectedCount} عنصر محتوى قابل للحذف. لن يتم حذف المنشور أو المجدول قبل سحب النشر.`,
+                confirmLabel: "حذف المحدد",
+                tone: "danger",
+                onConfirm: () => cleanupContent.mutate([...selectedIds])
+              })}
             >
               {cleanupContent.isPending ? "جاري التنظيف..." : "حذف المحدد"}
             </IconButton>
@@ -367,7 +379,13 @@ export function ContentLibrary(): ReactElement {
                   tone="danger"
                   className="min-h-9 px-3 py-1.5"
                   disabled={deleteContent.isPending}
-                  onClick={() => confirmContentDelete(row.title) && deleteContent.mutate(row.id)}
+                  onClick={() => setConfirmDialog({
+                    title: "حذف المحتوى",
+                    message: `سيتم حذف "${row.title}" نهائيًا من مكتبة المحتوى إذا لم يكن مرتبطًا بمهمة نشطة.`,
+                    confirmLabel: "حذف",
+                    tone: "danger",
+                    onConfirm: () => deleteContent.mutate(row.id)
+                  })}
                 >
                   حذف
                 </IconButton>
@@ -397,6 +415,50 @@ export function ContentLibrary(): ReactElement {
           <span className="px-2 text-slate-600">صفحة {content.data.page} من {totalPages}</span>
           <button className="rounded-md border border-slate-200 px-3 py-1.5 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" disabled={page >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>
             التالي
+          </button>
+        </div>
+      </div>
+      {confirmDialog ? (
+        <ConfirmDialog
+          config={confirmDialog}
+          onClose={() => setConfirmDialog(null)}
+          onConfirm={() => {
+            confirmDialog.onConfirm();
+            setConfirmDialog(null);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+interface ConfirmDialogConfig {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  tone?: "neutral" | "danger";
+  onConfirm: () => void;
+}
+
+function ConfirmDialog(props: { config: ConfirmDialogConfig; onClose: () => void; onConfirm: () => void }): ReactElement {
+  const isDanger = props.config.tone === "danger";
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4 py-6" role="dialog" aria-modal="true">
+      <div className="w-full max-w-md rounded-lg bg-white shadow-xl">
+        <div className="border-b border-slate-200 p-5">
+          <h3 className="text-lg font-semibold text-slate-950">{props.config.title}</h3>
+          <p className="mt-2 text-sm leading-7 text-slate-600">{props.config.message}</p>
+        </div>
+        <div className="flex flex-wrap justify-end gap-2 p-4">
+          <button type="button" className="min-h-9 rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50" onClick={props.onClose}>
+            إلغاء
+          </button>
+          <button
+            type="button"
+            className={`min-h-9 rounded-md border px-4 py-2 text-sm font-semibold text-white ${isDanger ? "border-red-600 bg-red-600 hover:bg-red-700" : "border-teal bg-teal hover:bg-teal/90"}`}
+            onClick={props.onConfirm}
+          >
+            {props.config.confirmLabel}
           </button>
         </div>
       </div>
@@ -477,19 +539,7 @@ function scoreClass(score: number): string {
 }
 
 function canDeleteContent(state: string): boolean {
-  return !["QUEUED", "APPROVED", "SCHEDULED", "PUBLISHED"].includes(state);
-}
-
-function confirmContentDelete(title: string): boolean {
-  return window.confirm(`سيتم حذف "${title}" نهائيًا من لوحة المحتوى إذا لم يكن مرتبطًا بمهمة نشطة. هل تريد المتابعة؟`);
-}
-
-function confirmBulkCleanup(count: number): boolean {
-  return window.confirm(`سيتم إلغاء المهام المنتظرة وحذف ${count} عنصر محتوى غير منشور. لن يتم حذف المنشور أو المجدول. هل تريد المتابعة؟`);
-}
-
-function confirmBulkRollback(count: number): boolean {
-  return window.confirm(`سيتم سحب المنشور من ووردبريس إلى مسودة وإلغاء جدولة المجدول لعدد ${count} عنصر محدد. هل تريد المتابعة؟`);
+  return !["QUEUED", "SCHEDULED", "PUBLISHED"].includes(state);
 }
 
 function SiteSelect(props: { sites: Array<{ id: string; name: string }> }): ReactElement {
