@@ -205,6 +205,9 @@ interface ContentRow {
   id: string;
   site_id: string;
   site_name: string;
+  batch_id: string | null;
+  batch_name: string | null;
+  batch_created_at: Date | null;
   topic: string;
   title: string | null;
   target_keyword: string | null;
@@ -323,10 +326,12 @@ class ContentService {
     const filter = buildContentListFilter(query);
     const [result, total] = await Promise.all([
       this.db.query<ContentRow>(
-      `SELECT c.id, c.site_id, s.name AS site_name, c.topic, c.title, c.target_keyword, c.status, c.mode,
+      `SELECT c.id, c.site_id, s.name AS site_name, c.batch_id, b.name AS batch_name, b.created_at AS batch_created_at,
+              c.topic, c.title, c.target_keyword, c.status, c.mode,
               c.scheduled_publish_at, c.content_score, c.updated_at, c.created_at
        FROM content_items c
        JOIN sites s ON s.id = c.site_id
+       LEFT JOIN content_batches b ON b.id = c.batch_id
        ${filter.sql}
        ORDER BY c.updated_at DESC, c.created_at DESC
        LIMIT ${filter.pageSize}
@@ -337,6 +342,7 @@ class ContentService {
         `SELECT COUNT(*)::text AS count
          FROM content_items c
          JOIN sites s ON s.id = c.site_id
+         LEFT JOIN content_batches b ON b.id = c.batch_id
          ${filter.sql}`,
         filter.values
       )
@@ -1753,6 +1759,9 @@ function toPublicContentRow(row: ContentRow): Record<string, unknown> {
     id: row.id,
     siteId: row.site_id,
     site: row.site_name,
+    batchId: row.batch_id ?? null,
+    batchName: row.batch_name ?? null,
+    batchCreatedAt: row.batch_created_at ?? null,
     topic: row.topic,
     title: row.title ?? row.topic,
     targetKeyword: row.target_keyword ?? "",

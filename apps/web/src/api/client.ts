@@ -57,6 +57,9 @@ export interface ContentDto {
   id: string;
   siteId: string;
   site: string;
+  batchId: string | null;
+  batchName: string | null;
+  batchCreatedAt: string | null;
   topic: string;
   title: string;
   targetKeyword: string;

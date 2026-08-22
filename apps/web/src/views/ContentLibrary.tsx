@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useEffect, useState, type FormEvent, type ReactElement } from "react";
-import { CheckCircle2, Copy, FilePlus2, FolderOpen, Play, RotateCcw, Search, Trash2, XCircle } from "lucide-react";
+import { CheckCircle2, Copy, FilePlus2, FolderOpen, Layers3, Play, RotateCcw, Search, Trash2, XCircle } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { contentStates, nextPrimaryOperation, type ContentOperation } from "@content-agent/shared";
 import { api, type ContentDto } from "../api/client";
@@ -153,6 +153,7 @@ export function ContentLibrary(): ReactElement {
 
   const bulkPreview = buildBulkPreview(bulkTopics, bulkStartDate, bulkPublishTime, bulkIntervalDays);
   const filteredContent = content.data.items;
+  const groupedContent = groupContentRows(filteredContent);
   const totalPages = Math.max(1, Math.ceil(content.data.total / content.data.pageSize));
   const currentStart = content.data.total === 0 ? 0 : (content.data.page - 1) * content.data.pageSize + 1;
   const currentEnd = Math.min(content.data.total, content.data.page * content.data.pageSize);
@@ -353,43 +354,49 @@ export function ContentLibrary(): ReactElement {
       ) : null}
       <div className="bg-slate-50/70 p-4">
         <div className="space-y-3">
-          {filteredContent.map((row) => (
-            <ContentCard
-              key={row.id}
-              row={row}
-              isAdmin={user.role === "ADMIN"}
-              selected={selectedIds.includes(row.id)}
-              onSelect={(checked) => setSelectedIds((current) => checked ? [...new Set([...current, row.id])] : current.filter((id) => id !== row.id))}
-              primaryAction={renderPrimaryAction(row.id, nextPrimaryOperation(row.state), runOperation.isPending, user.role === "ADMIN", (operation) =>
-                runOperation.mutate({ id: row.id, operation })
+          {groupedContent.map((group) => (
+            <ContentGroup
+              key={group.id}
+              group={group}
+              renderCard={(row) => (
+                <ContentCard
+                  key={row.id}
+                  row={row}
+                  isAdmin={user.role === "ADMIN"}
+                  selected={selectedIds.includes(row.id)}
+                  onSelect={(checked) => setSelectedIds((current) => checked ? [...new Set([...current, row.id])] : current.filter((id) => id !== row.id))}
+                  primaryAction={renderPrimaryAction(row.id, nextPrimaryOperation(row.state), runOperation.isPending, user.role === "ADMIN", (operation) =>
+                    runOperation.mutate({ id: row.id, operation })
+                  )}
+                  duplicateButton={(
+                    <IconButton
+                      icon={Copy}
+                      className="min-h-9 px-3 py-1.5"
+                      disabled={duplicateContent.isPending}
+                      onClick={() => duplicateContent.mutate(row.id)}
+                    >
+                      نسخ
+                    </IconButton>
+                  )}
+                  deleteButton={user.role === "ADMIN" && canDeleteContent(row.state) ? (
+                    <IconButton
+                      icon={Trash2}
+                      tone="danger"
+                      className="min-h-9 px-3 py-1.5"
+                      disabled={deleteContent.isPending}
+                      onClick={() => setConfirmDialog({
+                        title: "حذف المحتوى",
+                        message: `سيتم حذف "${row.title}" نهائيًا من مكتبة المحتوى إذا لم يكن مرتبطًا بمهمة نشطة.`,
+                        confirmLabel: "حذف",
+                        tone: "danger",
+                        onConfirm: () => deleteContent.mutate(row.id)
+                      })}
+                    >
+                      حذف
+                    </IconButton>
+                  ) : null}
+                />
               )}
-              duplicateButton={(
-                <IconButton
-                  icon={Copy}
-                  className="min-h-9 px-3 py-1.5"
-                  disabled={duplicateContent.isPending}
-                  onClick={() => duplicateContent.mutate(row.id)}
-                >
-                  نسخ
-                </IconButton>
-              )}
-              deleteButton={user.role === "ADMIN" && canDeleteContent(row.state) ? (
-                <IconButton
-                  icon={Trash2}
-                  tone="danger"
-                  className="min-h-9 px-3 py-1.5"
-                  disabled={deleteContent.isPending}
-                  onClick={() => setConfirmDialog({
-                    title: "حذف المحتوى",
-                    message: `سيتم حذف "${row.title}" نهائيًا من مكتبة المحتوى إذا لم يكن مرتبطًا بمهمة نشطة.`,
-                    confirmLabel: "حذف",
-                    tone: "danger",
-                    onConfirm: () => deleteContent.mutate(row.id)
-                  })}
-                >
-                  حذف
-                </IconButton>
-              ) : null}
             />
           ))}
         </div>
@@ -466,6 +473,48 @@ function ConfirmDialog(props: { config: ConfirmDialogConfig; onClose: () => void
   );
 }
 
+interface ContentDisplayGroup {
+  id: string;
+  title: string;
+  subtitle: string;
+  kind: "bulk" | "single";
+  rows: ContentDto[];
+}
+
+function ContentGroup(props: { group: ContentDisplayGroup; renderCard: (row: ContentDto) => ReactElement }): ReactElement {
+  const { group } = props;
+  if (group.kind === "single") {
+    return <>{group.rows.map(props.renderCard)}</>;
+  }
+  const completed = group.rows.filter((row) => ["APPROVED", "SCHEDULED", "PUBLISHED"].includes(row.state)).length;
+  const scheduled = group.rows.filter((row) => row.scheduledDate).length;
+  const averageScore = Math.round(group.rows.reduce((sum, row) => sum + row.score, 0) / Math.max(1, group.rows.length));
+  return (
+    <section className="rounded-lg border border-teal/20 bg-white p-3 shadow-sm">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-md bg-teal/5 px-4 py-3">
+        <div className="flex items-center gap-3">
+          <span className="inline-flex h-10 w-10 items-center justify-center rounded-md bg-teal text-white">
+            <Layers3 className="h-5 w-5" />
+          </span>
+          <div>
+            <h3 className="font-semibold text-slate-950">{group.title}</h3>
+            <p className="mt-1 text-xs text-slate-600">{group.subtitle}</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs font-semibold">
+          <span className="rounded-md bg-white px-2.5 py-1 text-slate-700">{group.rows.length} مقال</span>
+          <span className="rounded-md bg-white px-2.5 py-1 text-slate-700">{completed} مكتمل/جاهز</span>
+          <span className="rounded-md bg-white px-2.5 py-1 text-slate-700">{scheduled} مجدول</span>
+          <span className={`rounded-md px-2.5 py-1 ${scoreClass(averageScore)}`}>متوسط {averageScore}/100</span>
+        </div>
+      </div>
+      <div className="space-y-3">
+        {group.rows.map(props.renderCard)}
+      </div>
+    </section>
+  );
+}
+
 function ContentCard(props: {
   row: ContentDto;
   isAdmin: boolean;
@@ -536,6 +585,40 @@ function scoreClass(score: number): string {
   if (score >= 80) return "bg-emerald-50 text-emerald-700";
   if (score >= 60) return "bg-amber-50 text-amber-700";
   return "bg-rose-50 text-rose-700";
+}
+
+function groupContentRows(rows: ContentDto[]): ContentDisplayGroup[] {
+  const groups = new Map<string, ContentDisplayGroup>();
+  const singles: ContentDto[] = [];
+  for (const row of rows) {
+    if (!row.batchId) {
+      singles.push(row);
+      continue;
+    }
+    const existing = groups.get(row.batchId);
+    if (existing) {
+      existing.rows.push(row);
+      continue;
+    }
+    groups.set(row.batchId, {
+      id: row.batchId,
+      title: row.batchName || "دفعة محتوى",
+      subtitle: row.batchCreatedAt ? `تم الإنشاء ${formatDate(row.batchCreatedAt)}` : "دفعة محتوى مجمعة",
+      kind: "bulk",
+      rows: [row]
+    });
+  }
+  const output = [...groups.values()];
+  if (singles.length > 0) {
+    output.push({
+      id: "single-content",
+      title: "مقالات فردية",
+      subtitle: "محتوى تم إنشاؤه بشكل فردي",
+      kind: "single",
+      rows: singles
+    });
+  }
+  return output;
 }
 
 function canDeleteContent(state: string): boolean {
