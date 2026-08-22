@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useEffect, useState, type FormEvent, type ReactElement } from "react";
-import { CheckCircle2, Copy, FilePlus2, FolderOpen, Layers3, Play, RotateCcw, Search, Trash2, XCircle } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronLeft, Copy, FilePlus2, FolderOpen, Layers3, Play, RotateCcw, Search, Trash2, XCircle } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { contentStates, nextPrimaryOperation, type ContentOperation } from "@content-agent/shared";
 import { api, type ContentDto } from "../api/client";
@@ -483,15 +483,22 @@ interface ContentDisplayGroup {
 
 function ContentGroup(props: { group: ContentDisplayGroup; renderCard: (row: ContentDto) => ReactElement }): ReactElement {
   const { group } = props;
+  const [open, setOpen] = useState(false);
   if (group.kind === "single") {
     return <>{group.rows.map(props.renderCard)}</>;
   }
   const completed = group.rows.filter((row) => ["APPROVED", "SCHEDULED", "PUBLISHED"].includes(row.state)).length;
   const scheduled = group.rows.filter((row) => row.scheduledDate).length;
   const averageScore = Math.round(group.rows.reduce((sum, row) => sum + row.score, 0) / Math.max(1, group.rows.length));
+  const Icon = open ? ChevronDown : ChevronLeft;
   return (
     <section className="rounded-lg border border-teal/20 bg-white p-3 shadow-sm">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-md bg-teal/5 px-4 py-3">
+      <button
+        type="button"
+        className="flex w-full flex-wrap items-center justify-between gap-3 rounded-md bg-teal/5 px-4 py-3 text-right transition hover:bg-teal/10"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+      >
         <div className="flex items-center gap-3">
           <span className="inline-flex h-10 w-10 items-center justify-center rounded-md bg-teal text-white">
             <Layers3 className="h-5 w-5" />
@@ -501,16 +508,17 @@ function ContentGroup(props: { group: ContentDisplayGroup; renderCard: (row: Con
             <p className="mt-1 text-xs text-slate-600">{group.subtitle}</p>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2 text-xs font-semibold">
+        <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
           <span className="rounded-md bg-white px-2.5 py-1 text-slate-700">{group.rows.length} مقال</span>
-          <span className="rounded-md bg-white px-2.5 py-1 text-slate-700">{completed} مكتمل/جاهز</span>
-          <span className="rounded-md bg-white px-2.5 py-1 text-slate-700">{scheduled} مجدول</span>
+          <span className="rounded-md bg-white px-2.5 py-1 text-slate-700">{completed} جاهز</span>
+          <span className="rounded-md bg-white px-2.5 py-1 text-slate-700">{scheduled} بموعد</span>
           <span className={`rounded-md px-2.5 py-1 ${scoreClass(averageScore)}`}>متوسط {averageScore}/100</span>
+          <span className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-white text-slate-600">
+            <Icon className="h-4 w-4" />
+          </span>
         </div>
-      </div>
-      <div className="space-y-3">
-        {group.rows.map(props.renderCard)}
-      </div>
+      </button>
+      {open ? <div className="mt-3 space-y-3">{group.rows.map(props.renderCard)}</div> : null}
     </section>
   );
 }
