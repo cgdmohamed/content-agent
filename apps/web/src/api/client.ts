@@ -80,6 +80,7 @@ export interface ContentListParams {
 }
 
 export interface ContentDetailDto extends ContentDto {
+  wordpressUrl: string;
   ideas: Array<{ title: string; targetKeyword: string; angle: string }>;
   selectedIdea: { title?: string; targetKeyword?: string; angle?: string } | null;
   draftHtml: string;

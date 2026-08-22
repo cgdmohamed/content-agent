@@ -14,15 +14,23 @@ const allowedTags = [
   "b",
   "i",
   "a",
+  "img",
   "blockquote",
   "br",
   "hr",
+  "table",
+  "thead",
+  "tbody",
+  "tr",
+  "th",
+  "td",
   "code",
   "pre"
 ];
 
 const allowedAttributes: sanitizeHtml.IOptions["allowedAttributes"] = {
-  a: ["href", "title", "target", "rel"]
+  a: ["href", "title", "target", "rel"],
+  img: ["src", "alt", "title", "width", "height", "loading"]
 };
 
 export function sanitizeArticleHtml(html: string): string {
@@ -30,11 +38,12 @@ export function sanitizeArticleHtml(html: string): string {
     allowedTags,
     allowedAttributes,
     allowedSchemes: ["http", "https", "mailto"],
-    allowedSchemesByTag: { a: ["http", "https", "mailto"] },
+    allowedSchemesByTag: { a: ["http", "https", "mailto"], img: ["http", "https"] },
     allowProtocolRelative: false,
     disallowedTagsMode: "discard",
     transformTags: {
-      a: sanitizeHtml.simpleTransform("a", { rel: "noopener noreferrer" }, true)
+      a: sanitizeHtml.simpleTransform("a", { rel: "noopener noreferrer" }, true),
+      img: sanitizeHtml.simpleTransform("img", { loading: "lazy" }, true)
     }
   }).trim();
 }

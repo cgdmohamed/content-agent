@@ -74,9 +74,9 @@ export function scoreContent(input: ScoreInput): ScoreResult {
       : check("warning", "Meta description", 0, "Meta description should be around 90-170 characters")
   );
   checks.push(
-    wordCount >= 800
+    wordCount >= 1200
       ? check("pass", "Article depth", 15, `${wordCount} words found`)
-      : wordCount >= 500
+      : wordCount >= 800
         ? check("warning", "Article depth", 9, `${wordCount} words found`)
         : check("fail", "Article depth", 0, "Article is too short for a serious SEO page")
   );
@@ -98,6 +98,16 @@ export function scoreContent(input: ScoreInput): ScoreResult {
       : check("warning", "FAQ coverage", 0, "No FAQ section detected")
   );
   checks.push(
+    /خلاصة|ملخص|الإجابة المختصرة|باختصار|نقاط رئيسية/i.test(text)
+      ? check("pass", "GEO summary", 5, "Generative answer summary is present")
+      : check("warning", "GEO summary", 0, "No concise GEO summary detected")
+  );
+  checks.push(
+    /تواصل|احجز|ابدأ|اطلب|استشر|راسل|الخطوة التالية|اتصل/i.test(text)
+      ? check("pass", "CTA", 5, "Clear call to action is present")
+      : check("warning", "CTA", 0, "No clear call to action detected")
+  );
+  checks.push(
     input.editorialBrief?.trim()
       ? check("pass", "Editorial brief", 12, "Article is connected to a saved brief")
       : check("warning", "Editorial brief", 0, "No editorial brief is attached")
@@ -117,8 +127,8 @@ export function scoreContent(input: ScoreInput): ScoreResult {
           : check("warning", "Keyword usage", 0, "Focus keyword was not found in the article")
   );
 
-  const genericPhrasePenalty = /في عالمنا اليوم|في هذا المقال سوف|يعد .* من أهم|لا شك أن/i.test(text)
-    ? check("fail", "Generic phrases", -10, "Generic AI-style phrasing detected")
+  const genericPhrasePenalty = /في عالمنا اليوم|في هذا المقال سوف|يعد .* من أهم|لا شك أن|الاسم|البريد الإلكتروني|رقم الهاتف|املأ النموذج|أرسل الطلب/i.test(text)
+    ? check("fail", "Generic phrases", -10, "Generic AI-style or form-like phrasing detected")
     : check("pass", "Generic phrases", 5, "No obvious generic opening phrases detected");
   checks.push(genericPhrasePenalty);
 

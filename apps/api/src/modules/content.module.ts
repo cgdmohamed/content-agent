@@ -494,6 +494,7 @@ class ContentService {
       id: row.id,
       siteId: row.site_id,
       site: row.site_name,
+      wordpressUrl: row.wordpress_url ?? "",
       topic: row.topic,
       title: row.title ?? row.topic,
       targetKeyword: row.target_keyword ?? "",

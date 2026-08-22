@@ -1,7 +1,9 @@
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
-import { Bold, Bot, Check, ExternalLink, Heading2, Heading3, Image, Italic, Link2, List, ListOrdered, LoaderCircle, Network, Pilcrow, Quote, Redo2, RotateCcw, Save, SearchCheck, Send, Sparkles, Undo2, X } from "lucide-react";
+import TiptapLink from "@tiptap/extension-link";
+import TiptapImage from "@tiptap/extension-image";
+import { Bold, Bot, Check, ExternalLink, Heading2, Heading3, Image, Italic, Link2, LinkIcon, List, ListOrdered, LoaderCircle, Network, Pilcrow, Quote, Redo2, RotateCcw, Save, SearchCheck, Send, Sparkles, Undo2, X } from "lucide-react";
 import { forwardRef, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -101,7 +103,17 @@ export function ArticleWorkspace(): ReactElement {
     }
   });
   const editor = useEditor({
-    extensions: [StarterKit, Placeholder.configure({ placeholder: "ابدأ تحرير المقال هنا..." })],
+    extensions: [
+      StarterKit,
+      TiptapLink.configure({
+        openOnClick: false,
+        autolink: true,
+        defaultProtocol: "https",
+        HTMLAttributes: { rel: "noopener noreferrer", target: "_blank" }
+      }),
+      TiptapImage.configure({ inline: false, allowBase64: false }),
+      Placeholder.configure({ placeholder: "ابدأ تحرير المقال هنا..." })
+    ],
     content: "",
     onUpdate: ({ editor }) => {
       editorDirtyRef.current = editor.getHTML() !== loadedDraftRef.current;
@@ -134,7 +146,8 @@ export function ArticleWorkspace(): ReactElement {
     metaDescription: content.data.metaDescription,
     html: content.data.draftHtml,
     targetKeyword: content.data.targetKeyword,
-    imageAlt: content.data.imageAlt
+    imageAlt: content.data.imageAlt,
+    siteUrl: content.data.wordpressUrl
   });
   const activeAction = activeArticleAction({
     runPrimary: runPrimary.isPending ? runPrimary.variables : null,
@@ -179,25 +192,7 @@ export function ArticleWorkspace(): ReactElement {
             {activeAction}
           </div>
         ) : null}
-        <div className="mt-6 flex flex-col gap-3 md:flex-row md:items-center">
-          {steps.map(([label, state]) => {
-            const index = steps.findIndex((step) => step[1] === state);
-            const currentIndex = steps.findIndex((step) => step[1] === currentState);
-            const isDone = index <= currentIndex;
-            const isCurrent = state === currentState;
-            return (
-              <div key={state} className="flex flex-1 items-center gap-2">
-                <div className={`flex min-w-28 flex-1 items-center gap-2 rounded-md border px-3 py-2 text-sm ${isCurrent ? "border-teal bg-teal text-white" : isDone ? "border-teal/30 bg-teal/10 text-teal" : "border-slate-200 text-slate-500"}`}>
-                  <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${isCurrent ? "bg-white text-teal" : isDone ? "bg-teal text-white" : "bg-slate-100 text-slate-500"}`}>
-                    {isDone && !isCurrent ? <Check className="h-3.5 w-3.5" /> : index + 1}
-                  </span>
-                  <span>{label}</span>
-                </div>
-                {index < steps.length - 1 ? <span className={`hidden h-px w-6 md:block ${index < currentIndex ? "bg-teal" : "bg-slate-200"}`} /> : null}
-              </div>
-            );
-          })}
-        </div>
+        <ArticleStepper currentState={currentState} />
         <div className="mt-4 space-y-2">
           <ActionError error={runPrimary.error} />
           <ActionError error={saveArticle.error} />
@@ -395,12 +390,50 @@ function RichEditorToolbar({ editor }: { editor: Editor | null }): ReactElement 
       <ToolbarButton label="عريض" icon={Bold} active={editor?.isActive("bold")} disabled={disabled} onClick={() => editor?.chain().focus().toggleBold().run()} />
       <ToolbarButton label="مائل" icon={Italic} active={editor?.isActive("italic")} disabled={disabled} onClick={() => editor?.chain().focus().toggleItalic().run()} />
       <ToolbarButton label="اقتباس" icon={Quote} active={editor?.isActive("blockquote")} disabled={disabled} onClick={() => editor?.chain().focus().toggleBlockquote().run()} />
+      <ToolbarButton label="إضافة رابط" icon={LinkIcon} active={editor?.isActive("link")} disabled={disabled} onClick={() => setEditorLink(editor)} />
+      <ToolbarButton label="إضافة صورة" icon={Image} disabled={disabled} onClick={() => insertEditorImage(editor)} />
       <span className="mx-1 h-6 w-px bg-slate-200" />
       <ToolbarButton label="قائمة نقطية" icon={List} active={editor?.isActive("bulletList")} disabled={disabled} onClick={() => editor?.chain().focus().toggleBulletList().run()} />
       <ToolbarButton label="قائمة مرقمة" icon={ListOrdered} active={editor?.isActive("orderedList")} disabled={disabled} onClick={() => editor?.chain().focus().toggleOrderedList().run()} />
       <span className="mx-1 h-6 w-px bg-slate-200" />
       <ToolbarButton label="تراجع" icon={Undo2} disabled={disabled || !editor?.can().undo()} onClick={() => editor?.chain().focus().undo().run()} />
       <ToolbarButton label="إعادة" icon={Redo2} disabled={disabled || !editor?.can().redo()} onClick={() => editor?.chain().focus().redo().run()} />
+    </div>
+  );
+}
+
+function ArticleStepper({ currentState }: { currentState: ContentState }): ReactElement {
+  const currentIndex = Math.max(0, steps.findIndex((step) => step[1] === currentState));
+  return (
+    <div className="mt-6 overflow-x-auto pb-1">
+      <ol className="flex min-w-[760px] items-center" aria-label="خطوات المقال">
+        {steps.map(([label, state], index) => {
+          const isComplete = index < currentIndex;
+          const isCurrent = index === currentIndex;
+          const isReached = index <= currentIndex;
+          return (
+            <li key={state} className="flex flex-1 items-center">
+              <div className="flex min-w-0 flex-1 flex-col items-center gap-2">
+                <span
+                  className={`inline-flex h-9 w-9 items-center justify-center rounded-full border-2 text-sm font-bold ${
+                    isCurrent
+                      ? "border-teal bg-teal text-white shadow-sm"
+                      : isComplete
+                        ? "border-teal bg-teal/10 text-teal"
+                        : "border-slate-200 bg-white text-slate-400"
+                  }`}
+                >
+                  {isComplete ? <Check className="h-4 w-4" /> : index + 1}
+                </span>
+                <span className={`max-w-24 truncate text-center text-xs font-semibold ${isReached ? "text-teal" : "text-slate-500"}`}>{label}</span>
+              </div>
+              {index < steps.length - 1 ? (
+                <span className={`mx-2 h-0.5 flex-1 rounded-full ${index < currentIndex ? "bg-teal" : "bg-slate-200"}`} />
+              ) : null}
+            </li>
+          );
+        })}
+      </ol>
     </div>
   );
 }
@@ -427,6 +460,27 @@ function ToolbarButton(props: {
       <Icon className="h-4 w-4" />
     </button>
   );
+}
+
+function setEditorLink(editor: Editor | null): void {
+  if (!editor) return;
+  const previousUrl = editor.getAttributes("link").href as string | undefined;
+  const url = window.prompt("أدخل رابطًا كاملًا", previousUrl ?? "https://");
+  if (url === null) return;
+  const clean = url.trim();
+  if (!clean) {
+    editor.chain().focus().unsetLink().run();
+    return;
+  }
+  editor.chain().focus().extendMarkRange("link").setLink({ href: clean }).run();
+}
+
+function insertEditorImage(editor: Editor | null): void {
+  if (!editor) return;
+  const src = window.prompt("أدخل رابط الصورة", "https://");
+  if (!src?.trim()) return;
+  const alt = window.prompt("النص البديل للصورة", "") ?? "";
+  editor.chain().focus().setImage({ src: src.trim(), alt: alt.trim() }).run();
 }
 
 function activeArticleAction(state: {
@@ -579,6 +633,8 @@ function translateScoreCheck(name: string): string {
     "Internal links": "الروابط الداخلية",
     Structure: "البنية",
     "FAQ coverage": "تغطية الأسئلة الشائعة",
+    "GEO summary": "ملخص GEO",
+    CTA: "الدعوة للإجراء",
     "Editorial brief": "الموجز التحريري",
     "Image ALT": "النص البديل للصورة",
     "Keyword usage": "استخدام الكلمة المستهدفة",
@@ -604,6 +660,10 @@ function translateScoreMessage(message: string): string {
     "Add clearer headings and shorter paragraphs": "أضف عناوين أوضح وفقرات أقصر",
     "FAQ-style content is present": "يوجد محتوى بنمط الأسئلة الشائعة",
     "No FAQ section detected": "لم يتم العثور على قسم للأسئلة الشائعة",
+    "Generative answer summary is present": "يوجد ملخص مناسب للإجابات التوليدية",
+    "No concise GEO summary detected": "لا يوجد ملخص GEO واضح",
+    "Clear call to action is present": "توجد دعوة واضحة للإجراء",
+    "No clear call to action detected": "لا توجد دعوة واضحة للإجراء",
     "Article is connected to a saved brief": "المقال مرتبط بموجز تحريري محفوظ",
     "No editorial brief is attached": "لا يوجد موجز تحريري مرتبط",
     "Featured image ALT text is ready": "النص البديل للصورة البارزة جاهز",
@@ -613,6 +673,7 @@ function translateScoreMessage(message: string): string {
     "Focus keyword appears naturally": "الكلمة المستهدفة تظهر بشكل طبيعي",
     "Focus keyword was not found in the article": "لم تظهر الكلمة المستهدفة داخل المقال",
     "Generic AI-style phrasing detected": "توجد صياغات عامة تشبه مخرجات الذكاء الاصطناعي",
+    "Generic AI-style or form-like phrasing detected": "توجد صياغات عامة أو نصوص تشبه النماذج",
     "No obvious generic opening phrases detected": "لا توجد افتتاحيات عامة واضحة"
   };
   if (message.endsWith("words found")) return message.replace("words found", "كلمة");

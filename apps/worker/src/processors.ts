@@ -300,22 +300,33 @@ async function writeDraft(contentItemId: string): Promise<OperationResult> {
   const prompt = [
     standard,
     `اكتب مقالًا كاملًا للموقع: ${item.site_name}`,
+    `رابط الموقع الأساسي للروابط الداخلية: ${item.wordpress_url}`,
     `العنوان/الفكرة: ${String(idea.title ?? item.topic)}`,
     `الكلمة المستهدفة: ${String(idea.targetKeyword ?? idea.target_keyword ?? item.target_keyword ?? "")}`,
     `الزاوية: ${String(idea.angle ?? "")}`,
     `فجوات المنافسين: ${item.competitor_gaps ?? ""}`,
     `الموجز التحريري: ${JSON.stringify(item.editorial_brief)}`,
     `المصادر: ${JSON.stringify(item.sources)}`,
+    "متطلبات صارمة:",
+    "- لا يقل المقال عن 1200 كلمة عربية مفيدة، وإن كان الموضوع تنافسيًا اجعله أقرب إلى 1600 كلمة.",
+    "- لا تكتب أي نصوص نماذج مثل: الاسم، البريد الإلكتروني، رقم الهاتف، املأ النموذج، أرسل الطلب، أو حقول form.",
+    "- أضف CTA طبيعي في نهاية المقال بدون نموذج، مثل دعوة للتواصل أو طلب استشارة أو قراءة مقال مرتبط.",
+    "- أضف قسم أسئلة شائعة واضح للإجابة على أسئلة المستخدمين AEO.",
+    "- أضف فقرة ملخص تنفيذي أو إجابة مباشرة قابلة للظهور في الإجابات التوليدية GEO.",
+    "- أضف رابطين داخليين على الأقل باستخدام روابط من نفس الموقع فقط. إذا لم تعرف صفحات محددة استخدم رابط الصفحة الرئيسية ورابط بحث داخل الموقع.",
+    "- استخدم جدول مقارنة HTML عند وجود بدائل أو مقارنة.",
     'أعد JSON فقط بالشكل: {"title":"...","metaDescription":"...","contentHtml":"...","suggestedTags":["..."],"category":"...","imagePrompt":"...","imageAlt":"..."}'
   ].join("\n\n");
   const result = await generateText({ contentItemId, operation: "WRITE_DRAFT", prompt, preferred: ["anthropic", "openai"], maxTokens: 6000 });
   const article = parseArticle(result.text);
+  const contentHtml = enforceArticleRequirements(article.contentHtml, item);
   const score = scoreArticle({
-    html: article.contentHtml,
+    html: contentHtml,
     title: article.title,
     metaDescription: article.metaDescription,
     targetKeyword: String(idea.targetKeyword ?? idea.target_keyword ?? ""),
-    imageAlt: article.imageAlt
+    imageAlt: article.imageAlt,
+    siteUrl: item.wordpress_url
   });
   await query(
     `UPDATE content_items
@@ -334,7 +345,7 @@ async function writeDraft(contentItemId: string): Promise<OperationResult> {
          error_message = NULL,
          updated_at = now()
      WHERE id = $1`,
-    [contentItemId, article.title, article.metaDescription, article.contentHtml, JSON.stringify(article.suggestedTags), article.category, article.imagePrompt, article.imageAlt, score.score, JSON.stringify(score.checks)]
+    [contentItemId, article.title, article.metaDescription, contentHtml, JSON.stringify(article.suggestedTags), article.category, article.imagePrompt, article.imageAlt, score.score, JSON.stringify(score.checks)]
   );
   await appendAudit(contentItemId, "AI_DRAFT_WRITTEN", `تمت كتابة المسودة بواسطة ${result.provider}`, { provider: result.provider, model: result.model, score: score.score });
   return { provider: result.provider };
@@ -346,18 +357,24 @@ async function reviewDraft(contentItemId: string): Promise<OperationResult> {
   const prompt = [
     defaultWritingStandard(),
     "راجع المقال التالي وحسنه دون فقدان الروابط أو المعنى.",
-    "ركز على نية البحث، الوضوح، إزالة التكرار، تحسين العناوين، الوصف التعريفي، والأسئلة الشائعة إن كانت مفيدة.",
+    `رابط الموقع الأساسي للروابط الداخلية: ${item.wordpress_url}`,
+    "ركز على نية البحث، الوضوح، إزالة التكرار، تحسين العناوين، الوصف التعريفي، والأسئلة الشائعة.",
+    "ارفع جودة المقال إلى معيار SEO/AEO/GEO: إجابة مباشرة، عمق كاف، قسم أسئلة شائعة، CTA طبيعي، وروابط داخلية من نفس الموقع.",
+    "احذف أي نصوص تبدو كحقول نموذج أو placeholders مثل الاسم والبريد ورقم الهاتف واملأ النموذج.",
+    "لا يقل الناتج النهائي عن 1200 كلمة إذا كان المقال أقصر من ذلك.",
     item.draft_html,
     'أعد JSON فقط بالشكل: {"title":"...","metaDescription":"...","contentHtml":"...","suggestedTags":["..."],"category":"...","imagePrompt":"...","imageAlt":"..."}'
   ].join("\n\n");
   const result = await generateText({ contentItemId, operation: "REVIEW_DRAFT", prompt, preferred: ["anthropic", "openai"], maxTokens: 6000 });
   const article = parseArticle(result.text);
+  const contentHtml = enforceArticleRequirements(article.contentHtml, item);
   const score = scoreArticle({
-    html: article.contentHtml,
+    html: contentHtml,
     title: article.title,
     metaDescription: article.metaDescription,
     targetKeyword: item.target_keyword ?? undefined,
-    imageAlt: article.imageAlt
+    imageAlt: article.imageAlt,
+    siteUrl: item.wordpress_url
   });
   await query(
     `UPDATE content_items
@@ -376,7 +393,7 @@ async function reviewDraft(contentItemId: string): Promise<OperationResult> {
          error_message = NULL,
          updated_at = now()
      WHERE id = $1`,
-    [contentItemId, article.title, article.metaDescription, article.contentHtml, JSON.stringify(article.suggestedTags), article.category, article.imagePrompt, article.imageAlt, score.score, JSON.stringify(score.checks)]
+    [contentItemId, article.title, article.metaDescription, contentHtml, JSON.stringify(article.suggestedTags), article.category, article.imagePrompt, article.imageAlt, score.score, JSON.stringify(score.checks)]
   );
   await appendAudit(contentItemId, "AI_DRAFT_REVIEWED", `تمت مراجعة المقال بواسطة ${result.provider}`, { provider: result.provider, model: result.model, score: score.score });
   return { provider: result.provider };
@@ -418,13 +435,70 @@ function parseArticle(value: string): {
   };
 }
 
+function enforceArticleRequirements(html: string, item: ContentRecord): string {
+  let next = removeFormLikeCopy(html);
+  if (!hasCta(next)) {
+    next += `<h2>الخطوة التالية</h2><p>إذا كنت تقارن الخيارات وتريد قرارًا أدق، راجع احتياجاتك الفعلية وابدأ بتطبيق التوصيات المناسبة، أو تواصل مع فريق ${escapeHtml(item.site_name)} للحصول على توجيه يناسب حالتك.</p>`;
+  }
+  if (countInternalLinks(next, item.wordpress_url) < 2) {
+    const baseUrl = normalizeBaseUrl(item.wordpress_url);
+    const keyword = encodeURIComponent(String(item.target_keyword ?? item.topic).trim());
+    next += `<h2>روابط داخلية مفيدة</h2><ul><li><a href="${baseUrl}">زيارة الصفحة الرئيسية</a></li><li><a href="${baseUrl}?s=${keyword}">استكشاف مقالات مرتبطة</a></li></ul>`;
+  }
+  return sanitizeArticleHtml(next);
+}
+
+function removeFormLikeCopy(html: string): string {
+  return html
+    .replace(/<form[\s\S]*?<\/form>/gi, "")
+    .replace(/<(input|textarea|select|button)\b[\s\S]*?>/gi, "")
+    .replace(/<p>\s*(?:الاسم|اسمك|البريد الإلكتروني|رقم الهاتف|املأ النموذج|أرسل الطلب|اضغط إرسال)\s*<\/p>/gi, "");
+}
+
+function hasCta(html: string): boolean {
+  const text = html.replace(/<[^>]+>/g, " ");
+  return /تواصل|احجز|ابدأ|اطلب|استشر|راسل|الخطوة التالية|اتصل/i.test(text);
+}
+
+function countInternalLinks(html: string, siteUrl: string): number {
+  const host = safeHost(siteUrl);
+  if (!host) return 0;
+  return [...html.matchAll(/<a\s+[^>]*href=["']([^"']+)["']/gi)].filter((match) => safeHost(match[1] ?? "") === host).length;
+}
+
+function safeHost(url: string): string | null {
+  try {
+    return new URL(url).host.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function normalizeBaseUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    url.pathname = "/";
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return value;
+  }
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
 function defaultWritingStandard(): string {
   return [
     "اكتب بالعربية الطبيعية وبأسلوب محرر خبير.",
     "ابدأ بإجابة مباشرة ومفيدة، وتجنب المقدمات الإنشائية.",
-    "استخدم HTML دلالي نظيف: h2 و h3 و p و ul و ol و li و strong و a.",
-    "راع SEO وAEO والوضوح ونية البحث دون حشو كلمات مفتاحية.",
-    "لا تخترع مصادر أو روابط، ولا تذكر أنك ذكاء اصطناعي."
+    "استخدم HTML دلالي نظيف: h2 و h3 و p و ul و ol و li و strong و a و table عند الحاجة.",
+    "راع SEO وAEO وGEO والوضوح ونية البحث دون حشو كلمات مفتاحية.",
+    "أجب مباشرة، ثم توسع بتفاصيل عملية، ثم أضف أسئلة شائعة وCTA طبيعي.",
+    "لا تضف حقول نموذج أو placeholders أو نصوص form داخل المقال.",
+    "لا تخترع مصادر خارجية، ولا تذكر أنك ذكاء اصطناعي."
   ].join("\n");
 }
 

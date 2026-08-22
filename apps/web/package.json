@@ -16,6 +16,8 @@
     "@content-agent/types": "workspace:*",
     "@hookform/resolvers": "^3.10.0",
     "@tanstack/react-query": "^5.62.8",
+    "@tiptap/extension-image": "2.10.4",
+    "@tiptap/extension-link": "2.10.4",
     "@tiptap/extension-placeholder": "^2.10.4",
     "@tiptap/react": "^2.10.4",
     "@tiptap/starter-kit": "^2.10.4",
