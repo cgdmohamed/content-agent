@@ -5,7 +5,7 @@ import { asStringArray, extractJson } from "./json.js";
 import { scoreArticle } from "./scoring.js";
 import { generateGeminiImage } from "./gemini-image.js";
 import { fetchGscQueries, type GscSite } from "./google-search-console.js";
-import { publishPost, uploadMedia } from "./wordpress.js";
+import { publishPost, searchWordPressInternalContent, uploadMedia } from "./wordpress.js";
 
 interface ContentRecord {
   id: string;
@@ -334,6 +334,7 @@ async function writeDraft(contentItemId: string): Promise<OperationResult> {
     "- اجعل العنوان 55-60 حرفًا تقريبًا، والوصف التعريفي 140-160 حرفًا، وابدأ العنوان بالكلمة المستهدفة قدر الإمكان.",
     "- اجعل imageAlt يحتوي الكلمة المستهدفة حرفيًا.",
     "- أضف رابطين داخليين على الأقل من قائمة الروابط الداخلية المرشحة فقط، وبنص anchor طبيعي داخل الفقرات لا في قائمة منفصلة إلا عند الضرورة.",
+    "- ممنوع اختراع أي URL داخلي غير موجود في قائمة الروابط المرشحة. إذا لم تجد رابطًا مناسبًا، لا تضف رابطًا عشوائيًا.",
     "- إذا كانت القائمة لا تحتوي روابط كافية استخدم رابط الصفحة الرئيسية ورابط بحث داخل الموقع كحل أخير فقط.",
     "- استخدم جدول مقارنة HTML عند وجود بدائل أو مقارنة.",
     'أعد JSON فقط بالشكل: {"title":"...","metaDescription":"...","contentHtml":"...","suggestedTags":["..."],"category":"...","imagePrompt":"...","imageAlt":"..."}'
@@ -385,6 +386,7 @@ async function reviewDraft(contentItemId: string): Promise<OperationResult> {
     `روابط داخلية مرشحة من نفس الموقع: ${JSON.stringify(internalLinks)}`,
     "ركز على نية البحث، الوضوح، إزالة التكرار، تحسين العناوين، الوصف التعريفي، والأسئلة الشائعة.",
     "ارفع جودة المقال إلى معيار SEO/AEO/GEO: إجابة مباشرة، عمق كاف، قسم أسئلة شائعة، CTA طبيعي، وروابط داخلية من قائمة الروابط المرشحة.",
+    "ممنوع اختراع أي URL داخلي غير موجود في قائمة الروابط المرشحة. احذف الرابط الداخلي غير الموثق بدل استبداله بمسار عشوائي.",
     "تأكد أن الكلمة المستهدفة تظهر حرفيًا في العنوان والوصف وأول فقرة وH2/H3 وALT، مع عنوان لا يتجاوز 60 حرفًا ووصف لا يتجاوز 160 حرفًا.",
     "احذف أي نصوص تبدو كحقول نموذج أو placeholders مثل الاسم والبريد ورقم الهاتف واملأ النموذج.",
     `لا يقل الناتج النهائي عن 1200 كلمة إذا كان المقال أقصر من ذلك، وبنفس لغة الموقع فقط: ${languageName(item.language)}.`,
@@ -440,7 +442,8 @@ async function optimizeLinksAndCta(contentItemId: string): Promise<OperationResu
     `الكلمة المستهدفة: ${item.target_keyword ?? item.topic}`,
     `روابط داخلية مرشحة من نفس الموقع: ${JSON.stringify(internalLinks)}`,
     "المطلوب:",
-    "- أضف رابطين داخليين على الأقل داخل فقرات مناسبة وبـ anchor طبيعي يخدم نية البحث.",
+    "- أضف رابطين داخليين على الأقل من قائمة الروابط المرشحة فقط داخل فقرات مناسبة وبـ anchor طبيعي يخدم نية البحث.",
+    "- ممنوع اختراع أي URL داخلي غير موجود في قائمة الروابط المرشحة.",
     "- لا تضف روابط خارجية جديدة ولا تستخدم روابط خارج نفس الموقع.",
     "- إذا وجدت CTA ضعيفًا أو غير موجود، أضف فقرة CTA طبيعية في موضع مناسب قرب النهاية بدون نموذج أو حقول.",
     "- حافظ على نفس لغة المقال، ونفس العنوان العام، ونفس البنية قدر الإمكان.",
@@ -620,21 +623,46 @@ async function fetchInternalLinkCandidates(item: ContentRecord): Promise<Interna
      LIMIT 8`,
     [item.site_id, item.id, item.topic]
   );
-  return result.rows
+  const savedLinks = result.rows
     .map((row) => ({
       title: String(row.title ?? row.topic).trim(),
       url: String(row.wordpress_post_url ?? "").trim(),
       keyword: row.target_keyword?.trim() || null
     }))
     .filter((row) => row.title && isInternalUrl(row.url, item.wordpress_url));
+
+  let wordpressLinks: InternalLinkCandidate[] = [];
+  try {
+    const searchTerm = String(item.target_keyword ?? item.topic).trim();
+    const found = await searchWordPressInternalContent(
+      {
+        wordpress_url: item.wordpress_url,
+        wordpress_username: item.wordpress_username,
+        wordpress_application_password_encrypted: item.wordpress_application_password_encrypted
+      },
+      searchTerm
+    );
+    wordpressLinks = found
+      .map((row) => ({
+        title: row.title,
+        url: row.url,
+        keyword: row.subtype === "page" ? "page" : null
+      }))
+      .filter((row) => row.title && isInternalUrl(row.url, item.wordpress_url));
+  } catch {
+    wordpressLinks = [];
+  }
+
+  return uniqueInternalLinks([...savedLinks, ...wordpressLinks], item.wordpress_url).slice(0, 12);
 }
 
 function enforceArticleRequirements(html: string, item: ContentRecord, internalLinks: InternalLinkCandidate[] = []): string {
   let next = removeFormLikeCopy(html);
+  next = constrainInternalLinks(next, item, internalLinks);
   if (!hasCta(next, item.language)) {
     next += buildCtaFallback(item);
   }
-  if (countInternalLinks(next, item.wordpress_url) < 2) {
+  if (countAllowedInternalLinks(next, item, internalLinks) < 2) {
     next += buildInternalLinksFallback(item, internalLinks);
   }
   return sanitizeArticleHtml(next);
@@ -662,10 +690,37 @@ function buildCtaFallback(item: ContentRecord): string {
 function uniqueInternalLinks(links: InternalLinkCandidate[], siteUrl: string): InternalLinkCandidate[] {
   const seen = new Set<string>();
   return links.filter((link) => {
-    if (!isInternalUrl(link.url, siteUrl) || seen.has(link.url)) return false;
-    seen.add(link.url);
+    const key = normalizeUrlKey(link.url);
+    if (!key || !isInternalUrl(link.url, siteUrl) || seen.has(key)) return false;
+    seen.add(key);
     return true;
   });
+}
+
+function constrainInternalLinks(html: string, item: ContentRecord, internalLinks: InternalLinkCandidate[]): string {
+  const allowed = allowedInternalLinkKeys(item, internalLinks);
+  if (!allowed.size) return html;
+  return html.replace(/<a\b([^>]*)href=["']([^"']+)["']([^>]*)>([\s\S]*?)<\/a>/gi, (full, _before, href, _after, label) => {
+    if (!isInternalUrl(String(href), item.wordpress_url)) return full;
+    return allowed.has(normalizeUrlKey(String(href))) ? full : stripHtml(String(label));
+  });
+}
+
+function countAllowedInternalLinks(html: string, item: Pick<ContentRecord, "wordpress_url" | "target_keyword" | "topic">, internalLinks: InternalLinkCandidate[]): number {
+  const allowed = allowedInternalLinkKeys(item, internalLinks);
+  if (!allowed.size) return 0;
+  return [...html.matchAll(/<a\s+[^>]*href=["']([^"']+)["']/gi)].filter((match) => {
+    const href = String(match[1] ?? "");
+    return isInternalUrl(href, item.wordpress_url) && allowed.has(normalizeUrlKey(href));
+  }).length;
+}
+
+function allowedInternalLinkKeys(item: Pick<ContentRecord, "wordpress_url" | "target_keyword" | "topic">, internalLinks: InternalLinkCandidate[]): Set<string> {
+  const links = uniqueInternalLinks(internalLinks, item.wordpress_url).map((link) => link.url);
+  const baseUrl = normalizeBaseUrl(item.wordpress_url);
+  const keyword = encodeURIComponent(String(item.target_keyword ?? item.topic).trim());
+  links.push(baseUrl, `${baseUrl}?s=${keyword}`);
+  return new Set(links.map(normalizeUrlKey).filter(Boolean));
 }
 
 function removeFormLikeCopy(html: string): string {
@@ -682,16 +737,23 @@ function hasCta(html: string, language = "ar"): boolean {
   return language === "en" ? englishCta.test(text) : arabicCta.test(text) || englishCta.test(text);
 }
 
-function countInternalLinks(html: string, siteUrl: string): number {
-  const host = safeHost(siteUrl);
-  if (!host) return 0;
-  return [...html.matchAll(/<a\s+[^>]*href=["']([^"']+)["']/gi)].filter((match) => safeHost(match[1] ?? "") === host).length;
-}
-
 function isInternalUrl(url: string, siteUrl: string): boolean {
   const siteHost = safeHost(siteUrl);
   const linkHost = safeHost(url);
   return Boolean(siteHost && linkHost && siteHost === linkHost);
+}
+
+function normalizeUrlKey(value: string): string {
+  try {
+    const url = new URL(value);
+    url.hash = "";
+    url.protocol = url.protocol.toLowerCase();
+    url.hostname = url.hostname.toLowerCase().replace(/^www\./, "");
+    url.pathname = url.pathname.replace(/\/+$/, "") || "/";
+    return url.toString();
+  } catch {
+    return "";
+  }
 }
 
 function trustedResearchInstruction(siteUrl: string): string {

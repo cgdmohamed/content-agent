@@ -34,6 +34,12 @@ export interface WordPressMediaResult {
   sourceUrl: string;
 }
 
+export interface WordPressSearchResult {
+  title: string;
+  url: string;
+  subtype?: string | null;
+}
+
 export async function publishPost(site: WordPressSite, input: WordPressPostInput): Promise<WordPressPostResult> {
   validatePost(input);
   const base = safeBaseUrl(site.wordpress_url);
@@ -107,6 +113,38 @@ export async function uploadMedia(site: WordPressSite, input: { bytes: Buffer; m
     });
   }
   return { id: String(data.id), sourceUrl: data.source_url ?? "" };
+}
+
+export async function searchWordPressInternalContent(site: WordPressSite, search: string): Promise<WordPressSearchResult[]> {
+  const term = search.trim();
+  if (!term) return [];
+  const base = safeBaseUrl(site.wordpress_url);
+  const auth = authHeader(site);
+  const subtypes = ["post", "page"];
+  const results = await Promise.all(
+    subtypes.map(async (subtype) => {
+      const endpoint = new URL("/wp-json/wp/v2/search", base);
+      endpoint.searchParams.set("search", term);
+      endpoint.searchParams.set("per_page", "10");
+      endpoint.searchParams.set("subtype", subtype);
+      const response = await fetch(endpoint, {
+        headers: { Authorization: auth, Accept: "application/json" },
+        signal: AbortSignal.timeout(30_000)
+      });
+      const data = (await response.json()) as Array<{ title?: string; url?: string; subtype?: string }> | { message?: string };
+      if (!response.ok || !Array.isArray(data)) {
+        throw new Error("فشل البحث عن روابط داخلية في ووردبريس.");
+      }
+      return data
+        .map((row) => ({
+          title: String(row.title ?? "").trim(),
+          url: String(row.url ?? "").trim(),
+          subtype: row.subtype ?? subtype
+        }))
+        .filter((row) => row.title && row.url);
+    })
+  );
+  return results.flat();
 }
 
 async function getOrCreateTerm(base: URL, auth: string, taxonomy: "categories" | "tags", name: string): Promise<number> {
