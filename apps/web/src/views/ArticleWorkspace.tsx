@@ -103,6 +103,15 @@ export function ArticleWorkspace(): ReactElement {
       await queryClient.invalidateQueries({ queryKey: ["audit"] });
     }
   });
+  const optimizeLinks = useMutation({
+    mutationFn: () => api.optimizeContentLinks(id),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      await queryClient.invalidateQueries({ queryKey: ["content", id] });
+      await queryClient.invalidateQueries({ queryKey: ["content"] });
+      await queryClient.invalidateQueries({ queryKey: ["audit"] });
+    }
+  });
   const scheduleArticle = useMutation({
     mutationFn: () => api.scheduleContent(id, datetimeLocalToIso(scheduledAt)),
     onSuccess: async () => {
@@ -176,6 +185,7 @@ export function ArticleWorkspace(): ReactElement {
     skipImage: skipImage.isPending,
     generateImage: generateImage.isPending,
     uploadImage: uploadImage.isPending,
+    optimizeLinks: optimizeLinks.isPending,
     schedule: scheduleArticle.isPending
   });
 
@@ -219,6 +229,7 @@ export function ArticleWorkspace(): ReactElement {
           <ActionError error={restoreVersion.error} />
           <ActionError error={selectIdea.error} />
           <ActionError error={uploadImage.error} />
+          <ActionError error={optimizeLinks.error} />
         </div>
       </section>
 
@@ -257,6 +268,16 @@ export function ArticleWorkspace(): ReactElement {
         <aside className="space-y-4">
           <Panel title="تحسين محركات البحث">
             <OptimizationChecks html={content.data.draftHtml} score={score.score} />
+            <button
+              type="button"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-teal/30 bg-teal/5 px-3 py-2 text-sm font-semibold text-teal hover:bg-teal/10 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+              disabled={!canOptimizeLinks(currentState, content.data.draftHtml) || optimizeLinks.isPending}
+              onClick={() => optimizeLinks.mutate()}
+            >
+              {optimizeLinks.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Network className="h-4 w-4" />}
+              {optimizeLinks.isPending ? "جاري تحسين الروابط..." : "إعادة بناء الروابط والـ CTA"}
+            </button>
+            <ActionError error={optimizeLinks.error} />
             <Field label="الكلمة المستهدفة" value={content.data.targetKeyword} />
             <Field ref={metaRef} label="الوصف التعريفي" value={content.data.metaDescription} />
             <Field ref={categoryRef} label="التصنيف" value={content.data.category} />
@@ -578,17 +599,23 @@ function activeArticleAction(state: {
   skipImage: boolean;
   generateImage: boolean;
   uploadImage: boolean;
+  optimizeLinks: boolean;
   schedule: boolean;
 }): string | null {
   if (state.runPrimary) return actionInProgressLabel(state.runPrimary);
   if (state.save) return "جاري حفظ التعديلات...";
   if (state.selectIdea) return "جاري اختيار الفكرة وتجهيز الخطوة التالية...";
   if (state.restore) return "جاري استرجاع الإصدار...";
+  if (state.optimizeLinks) return "جاري تحسين الروابط الداخلية والـ CTA...";
   if (state.generateImage) return "جاري إرسال طلب توليد الصورة...";
   if (state.uploadImage) return "جاري رفع الصورة إلى ووردبريس...";
   if (state.skipImage) return "جاري تخطي الصورة...";
   if (state.schedule) return "جاري جدولة المقال...";
   return null;
+}
+
+function canOptimizeLinks(state: ContentState, draftHtml: string): boolean {
+  return ["DRAFTED", "REVIEWED", "IMAGE_READY"].includes(state) && stripHtml(draftHtml).length > 200;
 }
 
 function actionInProgressLabel(operation?: ContentOperation | null): string {

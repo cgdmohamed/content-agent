@@ -1721,6 +1721,7 @@ function queueForOperation(operation: string): string {
     RESEARCH_GAPS: "content-research",
     WRITE_DRAFT: "content-writing",
     REVIEW_DRAFT: "content-review",
+    OPTIMIZE_LINKS: "content-review",
     GENERATE_IMAGE: "content-image",
     PUBLISH: "wordpress-publish"
   };
@@ -1729,6 +1730,7 @@ function queueForOperation(operation: string): string {
 
 export function canRunOperation(state: ContentState, operation: string): boolean {
   if (operation === "SKIP_IMAGE") return state === "REVIEWED";
+  if (operation === "OPTIMIZE_LINKS") return ["DRAFTED", "REVIEWED", "IMAGE_READY"].includes(state);
   if (operation === "APPROVE") return state === "IMAGE_READY";
   if (operation === "SCHEDULE") return state === "APPROVED";
   return nextPrimaryOperation(state) === operation;
@@ -1859,6 +1861,11 @@ class ContentController {
   @Post(":id/review")
   review(@Param("id") id: string, @Req() request: AuthenticatedRequest): Promise<{ statusCode: 202; jobId: string; contentItemId: string }> {
     return this.content.enqueueOperation(id, "REVIEW_DRAFT", request.user?.id);
+  }
+
+  @Post(":id/optimize-links")
+  optimizeLinks(@Param("id") id: string, @Req() request: AuthenticatedRequest): Promise<{ statusCode: 202; jobId: string; contentItemId: string }> {
+    return this.content.enqueueOperation(id, "OPTIMIZE_LINKS", request.user?.id);
   }
 
   @Post(":id/generate-image")

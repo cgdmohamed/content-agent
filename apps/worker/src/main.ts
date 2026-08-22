@@ -26,6 +26,7 @@ type ContentOperation =
   | "RESEARCH_GAPS"
   | "WRITE_DRAFT"
   | "REVIEW_DRAFT"
+  | "OPTIMIZE_LINKS"
   | "GENERATE_IMAGE"
   | "SKIP_IMAGE"
   | "APPROVE"
@@ -204,6 +205,7 @@ function queueForOperation(operation: string): string {
     RESEARCH_GAPS: "content-research",
     WRITE_DRAFT: "content-writing",
     REVIEW_DRAFT: "content-review",
+    OPTIMIZE_LINKS: "content-review",
     GENERATE_IMAGE: "content-image",
     PUBLISH: "wordpress-publish"
   };

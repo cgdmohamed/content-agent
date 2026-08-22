@@ -68,6 +68,8 @@ export async function processContentOperation(contentItemId: string, operation: 
       return writeDraft(contentItemId);
     case "REVIEW_DRAFT":
       return reviewDraft(contentItemId);
+    case "OPTIMIZE_LINKS":
+      return optimizeLinksAndCta(contentItemId);
     case "GENERATE_IMAGE":
       return generateFeaturedImage(contentItemId);
     case "PUBLISH":
@@ -412,6 +414,66 @@ async function reviewDraft(contentItemId: string): Promise<OperationResult> {
     [contentItemId, article.title, article.metaDescription, contentHtml, JSON.stringify(article.suggestedTags), article.category, article.imagePrompt, article.imageAlt, score.score, JSON.stringify(score.checks)]
   );
   await appendAudit(contentItemId, "AI_DRAFT_REVIEWED", `تمت مراجعة المقال بواسطة ${result.provider}`, { provider: result.provider, model: result.model, score: score.score });
+  return { provider: result.provider };
+}
+
+async function optimizeLinksAndCta(contentItemId: string): Promise<OperationResult> {
+  const item = await fetchContent(contentItemId);
+  if (!item.draft_html) throw new Error("لا توجد مسودة لتحسين الروابط.");
+  if (!["DRAFTED", "REVIEWED", "IMAGE_READY"].includes(item.status)) {
+    throw new Error("يمكن إعادة بناء الروابط الداخلية قبل الاعتماد والجدولة فقط.");
+  }
+  const internalLinks = await fetchInternalLinkCandidates(item);
+  const prompt = [
+    languageInstruction(item.language),
+    "حسن المقال التالي فقط من ناحية الروابط الداخلية والـ CTA بدون إعادة كتابة شاملة.",
+    `اسم الموقع: ${item.site_name}`,
+    `رابط الموقع الأساسي: ${item.wordpress_url}`,
+    `الكلمة المستهدفة: ${item.target_keyword ?? item.topic}`,
+    `روابط داخلية مرشحة من نفس الموقع: ${JSON.stringify(internalLinks)}`,
+    "المطلوب:",
+    "- أضف رابطين داخليين على الأقل داخل فقرات مناسبة وبـ anchor طبيعي يخدم نية البحث.",
+    "- لا تضف روابط خارجية جديدة ولا تستخدم روابط خارج نفس الموقع.",
+    "- إذا وجدت CTA ضعيفًا أو غير موجود، أضف فقرة CTA طبيعية في موضع مناسب قرب النهاية بدون نموذج أو حقول.",
+    "- حافظ على نفس لغة المقال، ونفس العنوان العام، ونفس البنية قدر الإمكان.",
+    "- لا تحذف الأسئلة الشائعة أو الجداول أو الروابط الموجودة إلا لو كانت خاطئة.",
+    item.draft_html,
+    'أعد JSON فقط بالشكل: {"title":"...","metaDescription":"...","contentHtml":"...","suggestedTags":["..."],"category":"...","imagePrompt":"...","imageAlt":"..."}'
+  ].join("\n\n");
+  const result = await generateText({ contentItemId, operation: "OPTIMIZE_LINKS", prompt, preferred: ["anthropic", "openai"], maxTokens: 5000 });
+  const article = parseArticle(result.text);
+  const contentHtml = enforceArticleRequirements(article.contentHtml, item, internalLinks);
+  const score = scoreArticle({
+    html: contentHtml,
+    title: article.title,
+    metaDescription: article.metaDescription,
+    targetKeyword: item.target_keyword ?? undefined,
+    imageAlt: article.imageAlt,
+    siteUrl: item.wordpress_url
+  });
+  await query(
+    `UPDATE content_items
+     SET title = COALESCE($2, title),
+         meta_description = COALESCE($3, meta_description),
+         draft_html = $4,
+         tags = CASE WHEN jsonb_array_length($5::jsonb) > 0 THEN $5::jsonb ELSE tags END,
+         category = COALESCE(NULLIF($6, ''), category),
+         image_prompt = COALESCE(NULLIF($7, ''), image_prompt),
+         image_alt = COALESCE(NULLIF($8, ''), image_alt),
+         content_score = $9,
+         content_score_details = $10::jsonb,
+         failed_action = NULL,
+         error_message = NULL,
+         updated_at = now()
+     WHERE id = $1`,
+    [contentItemId, article.title, article.metaDescription, contentHtml, JSON.stringify(article.suggestedTags), article.category, article.imagePrompt, article.imageAlt, score.score, JSON.stringify(score.checks)]
+  );
+  await appendAudit(contentItemId, "AI_INTERNAL_LINKS_OPTIMIZED", `تم تحسين الروابط الداخلية والـ CTA بواسطة ${result.provider}`, {
+    provider: result.provider,
+    model: result.model,
+    internalLinks: internalLinks.slice(0, 5).map((link) => link.url),
+    score: score.score
+  });
   return { provider: result.provider };
 }
 

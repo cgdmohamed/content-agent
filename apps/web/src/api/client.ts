@@ -330,6 +330,8 @@ export const api = {
   }) => request<BulkContentResultDto>("/content/bulk", { method: "POST", body: JSON.stringify(body) }),
   runContentOperation: (id: string, path: "generate-ideas" | "research" | "write" | "review" | "generate-image" | "publish") =>
     request<{ statusCode: 202; jobId: string; contentItemId: string }>(`/content/${id}/${path}`, { method: "POST" }),
+  optimizeContentLinks: (id: string) =>
+    request<{ statusCode: 202; jobId: string; contentItemId: string }>(`/content/${id}/optimize-links`, { method: "POST" }),
   skipImage: (id: string) => request<ContentDetailDto>(`/content/${id}/skip-image`, { method: "POST" }),
   uploadContentImage: (id: string, body: { imageBase64: string; mimeType: string; filename: string; imageAlt?: string }) =>
     request<ContentDetailDto>(`/content/${id}/upload-image`, { method: "POST", body: JSON.stringify(body) }),
