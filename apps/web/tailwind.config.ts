@@ -5,7 +5,7 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ["Inter", "Tajawal", "Arial", "sans-serif"]
+        sans: ["Alexandria", "Tajawal", "Arial", "sans-serif"]
       },
       colors: {
         ink: "#17202a",

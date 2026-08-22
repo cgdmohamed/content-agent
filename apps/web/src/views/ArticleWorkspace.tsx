@@ -1,7 +1,7 @@
-import { useEditor, EditorContent } from "@tiptap/react";
+import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
-import { Bot, Check, ExternalLink, Image, Link2, Network, RotateCcw, Save, SearchCheck, Send, Sparkles, X } from "lucide-react";
+import { Bold, Bot, Check, ExternalLink, Heading2, Heading3, Image, Italic, Link2, List, ListOrdered, LoaderCircle, Network, Pilcrow, Quote, Redo2, RotateCcw, Save, SearchCheck, Send, Sparkles, Undo2, X } from "lucide-react";
 import { forwardRef, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -136,6 +136,15 @@ export function ArticleWorkspace(): ReactElement {
     targetKeyword: content.data.targetKeyword,
     imageAlt: content.data.imageAlt
   });
+  const activeAction = activeArticleAction({
+    runPrimary: runPrimary.isPending ? runPrimary.variables : null,
+    save: saveArticle.isPending,
+    selectIdea: selectIdea.isPending,
+    restore: restoreVersion.isPending,
+    skipImage: skipImage.isPending,
+    generateImage: generateImage.isPending,
+    schedule: scheduleArticle.isPending
+  });
 
   return (
     <div className="space-y-5">
@@ -152,18 +161,24 @@ export function ArticleWorkspace(): ReactElement {
               if (isRunnableArticleOperation(primaryOperation, user.role === "ADMIN")) runPrimary.mutate(primaryOperation);
             }}
           >
-            <Send className="h-4 w-4" />
-            {articleActionLabel(primaryOperation, user.role === "ADMIN")}
+            {runPrimary.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            {runPrimary.isPending ? actionInProgressLabel(runPrimary.variables) : articleActionLabel(primaryOperation, user.role === "ADMIN")}
           </button>
           <button
             className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
             onClick={() => saveArticle.mutate()}
             disabled={saveArticle.isPending}
           >
-            <Save className="h-4 w-4" />
+            {saveArticle.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             {saveArticle.isPending ? "جاري الحفظ..." : "حفظ"}
           </button>
         </div>
+        {activeAction ? (
+          <div className="mt-4 flex items-center gap-2 rounded-md border border-teal/25 bg-teal/5 px-3 py-2 text-sm font-medium text-teal">
+            <LoaderCircle className="h-4 w-4 animate-spin" />
+            {activeAction}
+          </div>
+        ) : null}
         <div className="mt-6 flex flex-col gap-3 md:flex-row md:items-center">
           {steps.map(([label, state]) => {
             const index = steps.findIndex((step) => step[1] === state);
@@ -207,6 +222,7 @@ export function ArticleWorkspace(): ReactElement {
                     <span className="block font-medium">{idea.title}</span>
                     <span className="mt-1 block text-xs text-slate-500">{idea.targetKeyword}</span>
                     <span className="mt-2 block text-sm text-slate-600">{idea.angle}</span>
+                    {selectIdea.isPending && selectIdea.variables === index ? <span className="mt-3 inline-flex items-center gap-2 text-xs font-semibold text-teal"><LoaderCircle className="h-3.5 w-3.5 animate-spin" />جاري اختيار الفكرة...</span> : null}
                   </button>
                 ))}
               </div>
@@ -214,8 +230,11 @@ export function ArticleWorkspace(): ReactElement {
           ) : null}
           <label className="text-sm font-semibold text-slate-600">العنوان</label>
           <input ref={titleRef} className="mt-2 w-full rounded-md border border-slate-200 px-3 py-2 text-lg font-semibold" defaultValue={content.data.title} dir="rtl" />
-          <div className="mt-5 rounded-md border border-slate-200 p-4" dir="rtl">
+          <div className="mt-5 overflow-hidden rounded-md border border-slate-200 bg-white" dir="rtl">
+            <RichEditorToolbar editor={editor} />
+            <div className="p-4">
             <EditorContent editor={editor} />
+            </div>
           </div>
         </div>
 
@@ -242,9 +261,18 @@ export function ArticleWorkspace(): ReactElement {
 
           <Panel title="الصورة">
             <div className="flex gap-2">
-              <button className="inline-flex flex-1 items-center justify-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm" onClick={() => generateImage.mutate()} disabled={generateImage.isPending}><Image className="h-4 w-4" />توليد</button>
-              <button className="inline-flex flex-1 items-center justify-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm" onClick={() => generateImage.mutate()} disabled={generateImage.isPending}><RotateCcw className="h-4 w-4" />إعادة التوليد</button>
-              <button className="inline-flex flex-1 items-center justify-center rounded-md border border-slate-200 px-3 py-2 text-sm" onClick={() => skipImage.mutate()} disabled={skipImage.isPending}>تخطي</button>
+              <button className="inline-flex flex-1 items-center justify-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" onClick={() => generateImage.mutate()} disabled={generateImage.isPending}>
+                {generateImage.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Image className="h-4 w-4" />}
+                {generateImage.isPending ? "جاري التوليد..." : "توليد"}
+              </button>
+              <button className="inline-flex flex-1 items-center justify-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" onClick={() => generateImage.mutate()} disabled={generateImage.isPending}>
+                {generateImage.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                {generateImage.isPending ? "جاري..." : "إعادة التوليد"}
+              </button>
+              <button className="inline-flex flex-1 items-center justify-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" onClick={() => skipImage.mutate()} disabled={skipImage.isPending}>
+                {skipImage.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
+                {skipImage.isPending ? "جاري التخطي..." : "تخطي"}
+              </button>
             </div>
             <ActionError error={generateImage.error} />
             <ActionError error={skipImage.error} />
@@ -272,7 +300,10 @@ export function ArticleWorkspace(): ReactElement {
               disabled={user.role !== "ADMIN" || currentState !== "APPROVED" || !scheduledAt || scheduleArticle.isPending}
               onClick={() => scheduleArticle.mutate()}
             >
-              {scheduleArticle.isPending ? "جاري الجدولة..." : "جدولة في ووردبريس"}
+              <span className="inline-flex items-center justify-center gap-2">
+                {scheduleArticle.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
+                {scheduleArticle.isPending ? "جاري الجدولة..." : "جدولة في ووردبريس"}
+              </span>
             </button>
             {user.role !== "ADMIN" ? <p className="text-xs text-slate-500">الجدولة متاحة للمدير فقط بعد الاعتماد.</p> : null}
             <ActionError error={scheduleArticle.error} />
@@ -320,7 +351,7 @@ export function ArticleWorkspace(): ReactElement {
                       disabled={restoreVersion.isPending || content.data.state === "PUBLISHED"}
                       onClick={() => restoreVersion.mutate(version.id)}
                     >
-                      استرجاع
+                      <span className="inline-flex items-center gap-2">{restoreVersion.isPending && restoreVersion.variables === version.id ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : null}{restoreVersion.isPending && restoreVersion.variables === version.id ? "جاري الاسترجاع..." : "استرجاع"}</span>
                     </button>
                   </div>
                 ))}
@@ -351,6 +382,85 @@ export function ArticleWorkspace(): ReactElement {
       ) : null}
     </div>
   );
+}
+
+function RichEditorToolbar({ editor }: { editor: Editor | null }): ReactElement {
+  const disabled = !editor;
+  return (
+    <div className="flex flex-wrap items-center gap-1 border-b border-slate-200 bg-slate-50 px-3 py-2">
+      <ToolbarButton label="فقرة" icon={Pilcrow} active={editor?.isActive("paragraph")} disabled={disabled} onClick={() => editor?.chain().focus().setParagraph().run()} />
+      <ToolbarButton label="عنوان 2" icon={Heading2} active={editor?.isActive("heading", { level: 2 })} disabled={disabled} onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()} />
+      <ToolbarButton label="عنوان 3" icon={Heading3} active={editor?.isActive("heading", { level: 3 })} disabled={disabled} onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()} />
+      <span className="mx-1 h-6 w-px bg-slate-200" />
+      <ToolbarButton label="عريض" icon={Bold} active={editor?.isActive("bold")} disabled={disabled} onClick={() => editor?.chain().focus().toggleBold().run()} />
+      <ToolbarButton label="مائل" icon={Italic} active={editor?.isActive("italic")} disabled={disabled} onClick={() => editor?.chain().focus().toggleItalic().run()} />
+      <ToolbarButton label="اقتباس" icon={Quote} active={editor?.isActive("blockquote")} disabled={disabled} onClick={() => editor?.chain().focus().toggleBlockquote().run()} />
+      <span className="mx-1 h-6 w-px bg-slate-200" />
+      <ToolbarButton label="قائمة نقطية" icon={List} active={editor?.isActive("bulletList")} disabled={disabled} onClick={() => editor?.chain().focus().toggleBulletList().run()} />
+      <ToolbarButton label="قائمة مرقمة" icon={ListOrdered} active={editor?.isActive("orderedList")} disabled={disabled} onClick={() => editor?.chain().focus().toggleOrderedList().run()} />
+      <span className="mx-1 h-6 w-px bg-slate-200" />
+      <ToolbarButton label="تراجع" icon={Undo2} disabled={disabled || !editor?.can().undo()} onClick={() => editor?.chain().focus().undo().run()} />
+      <ToolbarButton label="إعادة" icon={Redo2} disabled={disabled || !editor?.can().redo()} onClick={() => editor?.chain().focus().redo().run()} />
+    </div>
+  );
+}
+
+function ToolbarButton(props: {
+  label: string;
+  icon: typeof Bold;
+  active?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}): ReactElement {
+  const Icon = props.icon;
+  return (
+    <button
+      type="button"
+      title={props.label}
+      aria-label={props.label}
+      className={`inline-flex h-9 min-w-9 items-center justify-center rounded-md border px-2 text-sm font-semibold ${
+        props.active ? "border-teal bg-teal text-white" : "border-slate-200 bg-white text-slate-700 hover:border-teal/40 hover:bg-white"
+      } disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400`}
+      disabled={props.disabled}
+      onClick={props.onClick}
+    >
+      <Icon className="h-4 w-4" />
+    </button>
+  );
+}
+
+function activeArticleAction(state: {
+  runPrimary: ContentOperation | null;
+  save: boolean;
+  selectIdea: boolean;
+  restore: boolean;
+  skipImage: boolean;
+  generateImage: boolean;
+  schedule: boolean;
+}): string | null {
+  if (state.runPrimary) return actionInProgressLabel(state.runPrimary);
+  if (state.save) return "جاري حفظ التعديلات...";
+  if (state.selectIdea) return "جاري اختيار الفكرة وتجهيز الخطوة التالية...";
+  if (state.restore) return "جاري استرجاع الإصدار...";
+  if (state.generateImage) return "جاري إرسال طلب توليد الصورة...";
+  if (state.skipImage) return "جاري تخطي الصورة...";
+  if (state.schedule) return "جاري جدولة المقال...";
+  return null;
+}
+
+function actionInProgressLabel(operation?: ContentOperation | null): string {
+  if (!operation) return "جاري تنفيذ العملية...";
+  const labels: Partial<Record<ContentOperation, string>> = {
+    GENERATE_IDEAS: "جاري توليد الأفكار...",
+    RESEARCH_GAPS: "جاري تحليل المنافسين...",
+    WRITE_DRAFT: "جاري توليد المحتوى...",
+    REVIEW_DRAFT: "جاري مراجعة المقال...",
+    GENERATE_IMAGE: "جاري توليد الصورة...",
+    APPROVE: "جاري اعتماد المقال...",
+    PUBLISH: "جاري إرسال المقال إلى ووردبريس...",
+    RETRY: "جاري إعادة المحاولة..."
+  };
+  return labels[operation] ?? `جاري تنفيذ ${operationLabels[operation]}...`;
 }
 
 function OptimizationChecks({ html, score }: { html: string; score: number }): ReactElement {

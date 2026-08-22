@@ -1,3 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=Alexandria:wght@300;400;500;600;700;800&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -8,7 +10,7 @@
 
 body {
   margin: 0;
-  font-family: Inter, Tajawal, Arial, sans-serif;
+  font-family: Alexandria, Tajawal, Arial, sans-serif;
 }
 
 button,
@@ -28,7 +30,27 @@ input {
   margin-top: 1rem;
 }
 
+.prose h3 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-top: 0.85rem;
+}
+
 .prose p {
   margin-top: 0.75rem;
   line-height: 1.8;
+}
+
+.prose ul,
+.prose ol {
+  margin-top: 0.75rem;
+  padding-inline-start: 1.5rem;
+}
+
+.prose blockquote {
+  margin-top: 0.75rem;
+  border-inline-start: 3px solid #0f766e;
+  background: #f8fafc;
+  padding: 0.75rem 1rem;
+  color: #475569;
 }
