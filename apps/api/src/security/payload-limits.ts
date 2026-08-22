@@ -1,4 +1,4 @@
-export const jsonBodyLimit = "2mb";
+export const jsonBodyLimit = "12mb";
 export const formBodyLimit = "128kb";
 
 export const fieldLimits = {
@@ -23,6 +23,8 @@ export const fieldLimits = {
   metaDescription: 320,
   category: 120,
   imageAlt: 300,
+  imageUploadBase64: 11_200_000,
+  imageUploadFilename: 160,
   tag: 80,
   tags: 20,
   publishTime: 5

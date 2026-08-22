@@ -3,7 +3,7 @@ import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import TiptapLink from "@tiptap/extension-link";
 import TiptapImage from "@tiptap/extension-image";
-import { Bold, Bot, Check, ExternalLink, Heading2, Heading3, Image, Italic, Link2, LinkIcon, List, ListOrdered, LoaderCircle, Network, Pilcrow, Quote, Redo2, RotateCcw, Save, SearchCheck, Send, Sparkles, Undo2, X } from "lucide-react";
+import { Bold, Bot, Check, ExternalLink, Heading2, Heading3, Image, Italic, Link2, LinkIcon, List, ListOrdered, LoaderCircle, Network, Pilcrow, Quote, Redo2, RotateCcw, Save, SearchCheck, Send, Sparkles, Undo2, UploadCloud, X } from "lucide-react";
 import { forwardRef, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -28,6 +28,7 @@ export function ArticleWorkspace(): ReactElement {
   const metaRef = useRef<HTMLInputElement>(null);
   const categoryRef = useRef<HTMLInputElement>(null);
   const imageAltRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const tagsRef = useRef<HTMLInputElement>(null);
   const loadedDraftRef = useRef("");
   const editorDirtyRef = useRef(false);
@@ -35,6 +36,7 @@ export function ArticleWorkspace(): ReactElement {
   const user = useCurrentUser();
   const [scheduledAt, setScheduledAt] = useState("");
   const [competitorModalOpen, setCompetitorModalOpen] = useState(false);
+  const [imageDragActive, setImageDragActive] = useState(false);
   const content = useQuery({ queryKey: ["content", id], queryFn: () => api.contentItem(id), enabled: Boolean(id), refetchInterval: 5000 });
   const selectIdea = useMutation({
     mutationFn: (ideaIndex: number) => api.selectIdea(id, ideaIndex),
@@ -82,6 +84,23 @@ export function ArticleWorkspace(): ReactElement {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["jobs"] });
       await queryClient.invalidateQueries({ queryKey: ["content", id] });
+    }
+  });
+  const uploadImage = useMutation({
+    mutationFn: async (file: File) => {
+      validateManualImageFile(file);
+      const imageBase64 = await fileToBase64(file);
+      return api.uploadContentImage(id, {
+        imageBase64,
+        mimeType: file.type,
+        filename: file.name,
+        imageAlt: imageAltRef.current?.value || content.data?.imageAlt || content.data?.title || ""
+      });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["content", id] });
+      await queryClient.invalidateQueries({ queryKey: ["content"] });
+      await queryClient.invalidateQueries({ queryKey: ["audit"] });
     }
   });
   const scheduleArticle = useMutation({
@@ -156,6 +175,7 @@ export function ArticleWorkspace(): ReactElement {
     restore: restoreVersion.isPending,
     skipImage: skipImage.isPending,
     generateImage: generateImage.isPending,
+    uploadImage: uploadImage.isPending,
     schedule: scheduleArticle.isPending
   });
 
@@ -198,6 +218,7 @@ export function ArticleWorkspace(): ReactElement {
           <ActionError error={saveArticle.error} />
           <ActionError error={restoreVersion.error} />
           <ActionError error={selectIdea.error} />
+          <ActionError error={uploadImage.error} />
         </div>
       </section>
 
@@ -269,8 +290,49 @@ export function ArticleWorkspace(): ReactElement {
                 {skipImage.isPending ? "جاري التخطي..." : "تخطي"}
               </button>
             </div>
+            <div
+              className={`rounded-lg border-2 border-dashed px-4 py-5 text-center transition ${
+                imageDragActive ? "border-teal bg-teal/5" : "border-slate-200 bg-slate-50"
+              } ${uploadImage.isPending ? "opacity-70" : ""}`}
+              onDragOver={(event) => {
+                event.preventDefault();
+                setImageDragActive(true);
+              }}
+              onDragLeave={() => setImageDragActive(false)}
+              onDrop={(event) => {
+                event.preventDefault();
+                setImageDragActive(false);
+                const file = event.dataTransfer.files[0];
+                if (file) handleManualImageFile(file, uploadImage.mutate);
+              }}
+            >
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) handleManualImageFile(file, uploadImage.mutate);
+                  event.currentTarget.value = "";
+                }}
+              />
+              <UploadCloud className="mx-auto h-8 w-8 text-teal" />
+              <p className="mt-2 text-sm font-semibold text-slate-800">اسحب صورة هنا أو اختر ملفًا</p>
+              <p className="mt-1 text-xs leading-6 text-slate-500">PNG أو JPG أو WebP حتى 8MB. سيتم رفعها مباشرة إلى ووردبريس كصورة المقال.</p>
+              <button
+                type="button"
+                className="mt-3 inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-teal/40 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                disabled={uploadImage.isPending}
+                onClick={() => imageInputRef.current?.click()}
+              >
+                {uploadImage.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+                {uploadImage.isPending ? "جاري الرفع..." : "رفع صورة"}
+              </button>
+            </div>
             <ActionError error={generateImage.error} />
             <ActionError error={skipImage.error} />
+            <ActionError error={uploadImage.error} />
             {content.data.imageUrl ? <img className="mt-3 max-h-48 w-full rounded-md object-cover" src={content.data.imageUrl} alt={content.data.imageAlt || content.data.title} /> : null}
             <Field ref={imageAltRef} label="النص البديل" value={content.data.imageAlt} />
           </Panel>
@@ -483,6 +545,31 @@ function insertEditorImage(editor: Editor | null): void {
   editor.chain().focus().setImage({ src: src.trim(), alt: alt.trim() }).run();
 }
 
+function handleManualImageFile(file: File, upload: (file: File) => void): void {
+  upload(file);
+}
+
+function validateManualImageFile(file: File): void {
+  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+    throw new Error("ارفع صورة بصيغة PNG أو JPG أو WebP فقط.");
+  }
+  if (file.size > 8 * 1024 * 1024) {
+    throw new Error("حجم الصورة يجب ألا يتجاوز 8MB.");
+  }
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const value = String(reader.result ?? "");
+      resolve(value.includes(",") ? value.split(",").pop() ?? "" : value);
+    };
+    reader.onerror = () => reject(new Error("تعذر قراءة ملف الصورة."));
+    reader.readAsDataURL(file);
+  });
+}
+
 function activeArticleAction(state: {
   runPrimary: ContentOperation | null;
   save: boolean;
@@ -490,6 +577,7 @@ function activeArticleAction(state: {
   restore: boolean;
   skipImage: boolean;
   generateImage: boolean;
+  uploadImage: boolean;
   schedule: boolean;
 }): string | null {
   if (state.runPrimary) return actionInProgressLabel(state.runPrimary);
@@ -497,6 +585,7 @@ function activeArticleAction(state: {
   if (state.selectIdea) return "جاري اختيار الفكرة وتجهيز الخطوة التالية...";
   if (state.restore) return "جاري استرجاع الإصدار...";
   if (state.generateImage) return "جاري إرسال طلب توليد الصورة...";
+  if (state.uploadImage) return "جاري رفع الصورة إلى ووردبريس...";
   if (state.skipImage) return "جاري تخطي الصورة...";
   if (state.schedule) return "جاري جدولة المقال...";
   return null;

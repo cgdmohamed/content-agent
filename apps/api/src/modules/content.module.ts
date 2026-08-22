@@ -1,12 +1,12 @@
 import { BadRequestException, Body, Controller, Delete, Get, Injectable, Module, NotFoundException, Param, Patch, Post, Query, Req } from "@nestjs/common";
-import { ArrayMaxSize, IsArray, IsBoolean, IsDateString, IsInt, IsOptional, IsString, Max, MaxLength, Min } from "class-validator";
+import { ArrayMaxSize, IsArray, IsBoolean, IsDateString, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from "class-validator";
 import { findDuplicateMatches, nextPrimaryOperation, sanitizeArticleHtml, scoreContent, type ContentState } from "@content-agent/shared";
 import { AuditService, sanitizeAuditMetadata } from "../audit/audit.module.js";
 import { DatabaseService } from "../database/database.module.js";
 import { JobQueueService, normalizeBullJobId } from "../queue/job-queue.module.js";
 import { type AuthenticatedRequest, Roles } from "../security/access-control.js";
 import { fieldLimits } from "../security/payload-limits.js";
-import { updateWordPressPostStatus } from "../integrations/wordpress.js";
+import { updateWordPressPostStatus, uploadWordPressMedia } from "../integrations/wordpress.js";
 
 const defaultContentPageSize = 25;
 const maxContentPageSize = 100;
@@ -130,6 +130,25 @@ class UpdateContentDto {
 class ScheduleContentDto {
   @IsDateString()
   scheduledPublishAt!: string;
+}
+
+class UploadContentImageDto {
+  @IsString()
+  @MaxLength(fieldLimits.imageUploadBase64)
+  imageBase64!: string;
+
+  @IsString()
+  @IsIn(["image/jpeg", "image/png", "image/webp"])
+  mimeType!: string;
+
+  @IsString()
+  @MaxLength(fieldLimits.imageUploadFilename)
+  filename!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(fieldLimits.imageAlt)
+  imageAlt?: string;
 }
 
 class ScoreContentDto {
@@ -804,6 +823,74 @@ class ContentService {
       contentItemId: id,
       eventType: "CONTENT_IMAGE_SKIPPED",
       message: "تم تخطي صورة المقال"
+    });
+    return this.get(id);
+  }
+
+  async uploadImage(id: string, body: UploadContentImageDto, actorUserId?: string): Promise<Record<string, unknown>> {
+    const current = await this.db.query<{
+      status: ContentState;
+      siteId: string;
+      wordpressUrl: string;
+      wordpressUsername: string;
+      wordpressApplicationPasswordEncrypted: string;
+      siteStatus: "ACTIVE" | "DISABLED";
+    }>(
+      `SELECT c.status,
+              s.id AS "siteId",
+              s.wordpress_url AS "wordpressUrl",
+              s.wordpress_username AS "wordpressUsername",
+              s.wordpress_application_password_encrypted AS "wordpressApplicationPasswordEncrypted",
+              s.status AS "siteStatus"
+       FROM content_items c
+       JOIN sites s ON s.id = c.site_id
+       WHERE c.id = $1`,
+      [id]
+    );
+    const item = current.rows[0];
+    if (!item) throw new NotFoundException("عنصر المحتوى غير موجود");
+    assertActiveContentSite(item.siteStatus);
+    if (!["REVIEWED", "IMAGE_READY"].includes(item.status)) {
+      throw new BadRequestException("يمكن رفع الصورة بعد مراجعة المقال وقبل الاعتماد.");
+    }
+    const bytes = decodeImageBase64(body.imageBase64);
+    if (bytes.length > 8 * 1024 * 1024) {
+      throw new BadRequestException("حجم الصورة يجب ألا يتجاوز 8MB.");
+    }
+    const media = await uploadWordPressMedia(
+      {
+        id: item.siteId,
+        wordpress_url: item.wordpressUrl,
+        wordpress_username: item.wordpressUsername,
+        wordpress_application_password_encrypted: item.wordpressApplicationPasswordEncrypted
+      },
+      {
+        bytes,
+        mimeType: body.mimeType,
+        filename: body.filename,
+        altText: body.imageAlt
+      }
+    );
+    await this.db.query(
+      `UPDATE content_items
+       SET status = 'IMAGE_READY',
+           last_successful_state = 'IMAGE_READY',
+           wordpress_media_id = $2,
+           image_url = $3,
+           image_alt = COALESCE($4, image_alt, ''),
+           failed_action = NULL,
+           error_message = NULL,
+           updated_at = now()
+       WHERE id = $1`,
+      [id, media.id, media.sourceUrl, body.imageAlt?.trim() || null]
+    );
+    await this.audit.record({
+      actorUserId,
+      contentItemId: id,
+      siteId: item.siteId,
+      eventType: "CONTENT_IMAGE_UPLOADED",
+      message: "تم رفع صورة المقال يدويًا",
+      metadata: { wordpressMediaId: media.id, mimeType: body.mimeType, filename: body.filename }
     });
     return this.get(id);
   }
@@ -1603,6 +1690,14 @@ export function canDeleteContentStatus(status: ContentState): boolean {
   return !["QUEUED", "SCHEDULED", "PUBLISHED"].includes(status);
 }
 
+function decodeImageBase64(value: string): Buffer {
+  const clean = value.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, "").trim();
+  if (!clean || !/^[a-zA-Z0-9+/=\s]+$/.test(clean)) {
+    throw new BadRequestException("صيغة الصورة غير صالحة.");
+  }
+  return Buffer.from(clean, "base64");
+}
+
 function toPublicContentRow(row: ContentRow): Record<string, unknown> {
   return {
     id: row.id,
@@ -1715,6 +1810,11 @@ class ContentController {
   @Post(":id/skip-image")
   skipImage(@Param("id") id: string, @Req() request: AuthenticatedRequest): Promise<Record<string, unknown>> {
     return this.content.skipImage(id, request.user?.id);
+  }
+
+  @Post(":id/upload-image")
+  uploadImage(@Param("id") id: string, @Body() body: UploadContentImageDto, @Req() request: AuthenticatedRequest): Promise<Record<string, unknown>> {
+    return this.content.uploadImage(id, body, request.user?.id);
   }
 
   @Post(":id/publish")
