@@ -199,13 +199,13 @@ export function ArticleWorkspace(): ReactElement {
           </div>
           <button
             className="inline-flex items-center gap-2 rounded-md bg-teal px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
-            disabled={!isRunnableArticleOperation(primaryOperation, user.role === "ADMIN") || runPrimary.isPending}
+            disabled={!isRunnableArticleOperation(currentState, primaryOperation, user.role === "ADMIN") || runPrimary.isPending}
             onClick={() => {
-              if (isRunnableArticleOperation(primaryOperation, user.role === "ADMIN")) runPrimary.mutate(primaryOperation);
+              if (isRunnableArticleOperation(currentState, primaryOperation, user.role === "ADMIN")) runPrimary.mutate(primaryOperation);
             }}
           >
             {runPrimary.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            {runPrimary.isPending ? actionInProgressLabel(runPrimary.variables) : articleActionLabel(primaryOperation, user.role === "ADMIN")}
+            {runPrimary.isPending ? actionInProgressLabel(runPrimary.variables) : articleActionLabel(currentState, primaryOperation, user.role === "ADMIN")}
           </button>
           <button
             className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
@@ -885,13 +885,15 @@ function draftContentHtml(value?: string | null): string {
   return value?.trim() ? value : "<p>لا توجد مسودة بعد.</p>";
 }
 
-function isRunnableArticleOperation(operation: ContentOperation | null, isAdmin: boolean): operation is ContentOperation {
+function isRunnableArticleOperation(state: ContentState, operation: ContentOperation | null, isAdmin: boolean): operation is ContentOperation {
+  if (state === "SCHEDULED") return false;
   if (!operation || ["SELECT_IDEA", "SCHEDULE"].includes(operation)) return false;
   if ((operation === "APPROVE" || operation === "PUBLISH") && !isAdmin) return false;
   return true;
 }
 
-function articleActionLabel(operation: ContentOperation | null, isAdmin: boolean): string {
+function articleActionLabel(state: ContentState, operation: ContentOperation | null, isAdmin: boolean): string {
+  if (state === "SCHEDULED") return "مجدول للنشر";
   if (!operation) return "لا يوجد إجراء";
   if ((operation === "APPROVE" || operation === "PUBLISH") && !isAdmin) return "بانتظار المدير";
   return operationLabels[operation];

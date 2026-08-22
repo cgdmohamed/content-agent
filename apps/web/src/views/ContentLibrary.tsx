@@ -365,7 +365,7 @@ export function ContentLibrary(): ReactElement {
                   isAdmin={user.role === "ADMIN"}
                   selected={selectedIds.includes(row.id)}
                   onSelect={(checked) => setSelectedIds((current) => checked ? [...new Set([...current, row.id])] : current.filter((id) => id !== row.id))}
-                  primaryAction={renderPrimaryAction(row.id, nextPrimaryOperation(row.state), runOperation.isPending, user.role === "ADMIN", (operation) =>
+                  primaryAction={renderPrimaryAction(row.id, row.state, nextPrimaryOperation(row.state), runOperation.isPending, user.role === "ADMIN", (operation) =>
                     runOperation.mutate({ id: row.id, operation })
                   )}
                   duplicateButton={(
@@ -647,11 +647,15 @@ function SiteSelect(props: { sites: Array<{ id: string; name: string }> }): Reac
 
 function renderPrimaryAction(
   id: string,
+  state: string,
   operation: ContentOperation | null,
   pending: boolean,
   isAdmin: boolean,
   run: (operation: ContentOperation) => void
 ): ReactElement {
+  if (state === "SCHEDULED") {
+    return <span className="inline-flex items-center gap-2 rounded-md bg-amber-50 px-3 py-1.5 font-medium text-amber-700"><CheckCircle2 className="h-4 w-4" />مجدول للنشر</span>;
+  }
   if (!operation) return <span className="inline-flex items-center gap-2 px-3 py-1.5 text-slate-500"><CheckCircle2 className="h-4 w-4" />مكتمل</span>;
   if ((operation === "APPROVE" || operation === "PUBLISH") && !isAdmin) return <span className="px-3 py-1.5 text-slate-500">بانتظار المدير</span>;
   if (operation === "SELECT_IDEA") {
