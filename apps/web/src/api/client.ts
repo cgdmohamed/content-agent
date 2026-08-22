@@ -310,6 +310,7 @@ export const api = {
     request<ContentDto>("/content", { method: "POST", body: JSON.stringify(body) }),
   deleteContent: (id: string) => request<{ ok: true; id: string }>(`/content/${id}`, { method: "DELETE" }),
   cleanupContent: (ids: string[]) => request<{ ok: true; deleted: string[]; cancelledJobs: number; skipped: Array<{ id: string; reason: string }> }>("/content/cleanup", { method: "POST", body: JSON.stringify({ ids }) }),
+  rollbackContentPublishing: (ids: string[]) => request<{ ok: true; rolledBack: string[]; cancelledJobs: number; skipped: Array<{ id: string; reason: string }> }>("/content/rollback-publishing", { method: "POST", body: JSON.stringify({ ids }) }),
   duplicateContent: (id: string) => request<ContentDetailDto>(`/content/${id}/duplicate`, { method: "POST" }),
   retryContent: (id: string) => request<{ statusCode: 202; jobId: string; contentItemId: string }>(`/content/${id}/retry`, { method: "POST" }),
   createBulkContent: (body: {

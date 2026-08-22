@@ -6,6 +6,7 @@ import { DatabaseService } from "../database/database.module.js";
 import { JobQueueService, normalizeBullJobId } from "../queue/job-queue.module.js";
 import { type AuthenticatedRequest, Roles } from "../security/access-control.js";
 import { fieldLimits } from "../security/payload-limits.js";
+import { updateWordPressPostStatus } from "../integrations/wordpress.js";
 
 const defaultContentPageSize = 25;
 const maxContentPageSize = 100;
@@ -1114,6 +1115,114 @@ class ContentService {
     return { ok: true, deleted, cancelledJobs, skipped };
   }
 
+  async rollbackPublishing(ids: string[], actorUserId?: string): Promise<{ ok: true; rolledBack: string[]; cancelledJobs: number; skipped: Array<{ id: string; reason: string }> }> {
+    const uniqueIds = [...new Set(ids.map((id) => id.trim()).filter(Boolean))];
+    if (uniqueIds.length === 0) throw new BadRequestException("اختر عنصر محتوى واحدًا على الأقل.");
+    const rows = await this.db.query<{
+      id: string;
+      siteId: string;
+      status: ContentState;
+      wordpressPostId: string | null;
+      wordpressUrl: string;
+      wordpressUsername: string;
+      wordpressApplicationPasswordEncrypted: string;
+    }>(
+      `SELECT c.id,
+              c.site_id AS "siteId",
+              c.status,
+              c.wordpress_post_id AS "wordpressPostId",
+              s.wordpress_url AS "wordpressUrl",
+              s.wordpress_username AS "wordpressUsername",
+              s.wordpress_application_password_encrypted AS "wordpressApplicationPasswordEncrypted"
+       FROM content_items c
+       JOIN sites s ON s.id = c.site_id
+       WHERE c.id = ANY($1::uuid[])`,
+      [uniqueIds]
+    );
+    const byId = new Map(rows.rows.map((row) => [row.id, row]));
+    const rolledBack: string[] = [];
+    const skipped: Array<{ id: string; reason: string }> = [];
+    let cancelledJobs = 0;
+
+    for (const id of uniqueIds) {
+      const item = byId.get(id);
+      if (!item) {
+        skipped.push({ id, reason: "غير موجود" });
+        continue;
+      }
+      if (!["SCHEDULED", "PUBLISHED"].includes(item.status)) {
+        skipped.push({ id, reason: "ليس منشورًا أو مجدولًا" });
+        continue;
+      }
+      const jobs = await this.db.query<{ id: string; queueName: string; bullJobId: string }>(
+        `SELECT id, queue_name AS "queueName", bull_job_id AS "bullJobId"
+         FROM job_runs
+         WHERE content_item_id = $1
+           AND operation = 'PUBLISH'
+           AND status IN ('WAITING', 'DELAYED')
+           AND bull_job_id IS NOT NULL`,
+        [id]
+      );
+      for (const job of jobs.rows) {
+        try {
+          await this.queue.cancelQueuedJob(job.queueName, job.bullJobId);
+        } catch {
+          // The job may already be absent from Redis.
+        }
+      }
+      if (jobs.rowCount) {
+        cancelledJobs += jobs.rowCount;
+        await this.db.query(
+          `UPDATE job_runs
+           SET status = 'CANCELLED',
+               error = NULL,
+               finished_at = now()
+           WHERE content_item_id = $1
+             AND operation = 'PUBLISH'
+             AND status IN ('WAITING', 'DELAYED')`,
+          [id]
+        );
+      }
+      if (item.wordpressPostId) {
+        await updateWordPressPostStatus(
+          {
+            id: item.siteId,
+            wordpress_url: item.wordpressUrl,
+            wordpress_username: item.wordpressUsername,
+            wordpress_application_password_encrypted: item.wordpressApplicationPasswordEncrypted
+          },
+          item.wordpressPostId,
+          "draft"
+        );
+      }
+      await this.db.query(
+        `UPDATE content_items
+         SET status = 'APPROVED',
+             wordpress_post_status = CASE WHEN wordpress_post_id IS NULL THEN wordpress_post_status ELSE 'draft' END,
+             scheduled_publish_at = NULL,
+             auto_publish = false,
+             published_at = NULL,
+             last_successful_state = 'APPROVED',
+             failed_action = NULL,
+             error_message = NULL,
+             updated_at = now()
+         WHERE id = $1`,
+        [id]
+      );
+      await this.audit.record({
+        actorUserId,
+        contentItemId: id,
+        siteId: item.siteId,
+        eventType: "CONTENT_PUBLISHING_ROLLED_BACK",
+        message: item.wordpressPostId ? "تم سحب المقال من ووردبريس وإرجاعه للاعتماد" : "تم إلغاء جدولة المقال وإرجاعه للاعتماد",
+        metadata: { previousStatus: item.status, wordpressPostId: item.wordpressPostId, cancelledJobs: jobs.rowCount }
+      });
+      rolledBack.push(id);
+    }
+
+    return { ok: true, rolledBack, cancelledJobs, skipped };
+  }
+
   private async resolveIdeasCount(input: number | undefined): Promise<number> {
     if (typeof input === "number") return clampNumber(input, 1, 20);
     const result = await this.db.query<{ value: { defaultIdeasCount?: number } }>(
@@ -1534,6 +1643,12 @@ class ContentController {
   @Roles("ADMIN")
   cleanup(@Body() body: BulkContentIdsDto, @Req() request: AuthenticatedRequest): Promise<{ ok: true; deleted: string[]; cancelledJobs: number; skipped: Array<{ id: string; reason: string }> }> {
     return this.content.cleanup(body.ids, request.user?.id);
+  }
+
+  @Post("rollback-publishing")
+  @Roles("ADMIN")
+  rollbackPublishing(@Body() body: BulkContentIdsDto, @Req() request: AuthenticatedRequest): Promise<{ ok: true; rolledBack: string[]; cancelledJobs: number; skipped: Array<{ id: string; reason: string }> }> {
+    return this.content.rollbackPublishing(body.ids, request.user?.id);
   }
 
   @Get(":id")

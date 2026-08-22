@@ -62,3 +62,24 @@ export async function testRankMathBridge(site: InternalSiteCredentials): Promise
   }
   return { status: "CONNECTED", message: "جسر Rank Math متاح." };
 }
+
+export async function updateWordPressPostStatus(site: InternalSiteCredentials, postId: string, status: "draft" | "trash"): Promise<{ id: string; status: string }> {
+  const base = safeWordPressUrl(site.wordpress_url);
+  const password = decryptSecret(site.wordpress_application_password_encrypted);
+  const endpoint = new URL(`/wp-json/wp/v2/posts/${postId}`, base);
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${site.wordpress_username}:${password}`).toString("base64")}`,
+      "Content-Type": "application/json",
+      Accept: "application/json"
+    },
+    body: JSON.stringify({ status }),
+    signal: AbortSignal.timeout(30_000)
+  });
+  const data = (await response.json()) as { id?: number; status?: string; message?: string };
+  if (!response.ok || !data.id) {
+    throw new Error(data.message ?? `فشل تحديث حالة المقال في ووردبريس برمز ${response.status}.`);
+  }
+  return { id: String(data.id), status: data.status ?? status };
+}

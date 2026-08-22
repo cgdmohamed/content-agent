@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useEffect, useState, type FormEvent, type ReactElement } from "react";
-import { CheckCircle2, Copy, FilePlus2, FolderOpen, Play, Search, Trash2, XCircle } from "lucide-react";
+import { CheckCircle2, Copy, FilePlus2, FolderOpen, Play, RotateCcw, Search, Trash2, XCircle } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { contentStates, nextPrimaryOperation, type ContentOperation } from "@content-agent/shared";
 import { api } from "../api/client";
@@ -85,6 +85,16 @@ export function ContentLibrary(): ReactElement {
   });
   const cleanupContent = useMutation({
     mutationFn: api.cleanupContent,
+    onSuccess: async () => {
+      setSelectedIds([]);
+      await queryClient.invalidateQueries({ queryKey: ["content"] });
+      await queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      await queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      await queryClient.invalidateQueries({ queryKey: ["audit"] });
+    }
+  });
+  const rollbackPublishing = useMutation({
+    mutationFn: api.rollbackContentPublishing,
     onSuccess: async () => {
       setSelectedIds([]);
       await queryClient.invalidateQueries({ queryKey: ["content"] });
@@ -250,6 +260,7 @@ export function ContentLibrary(): ReactElement {
         <ActionError error={duplicateContent.error} />
         <ActionError error={deleteContent.error} />
         <ActionError error={cleanupContent.error} />
+        <ActionError error={rollbackPublishing.error} />
       </div>
       <div className="grid gap-3 border-b border-slate-100 px-5 py-4 md:grid-cols-7">
         <label>
@@ -310,6 +321,13 @@ export function ContentLibrary(): ReactElement {
           </label>
           <div className="flex items-center gap-2">
             <span className="text-sm text-slate-500">{selectedCount > 0 ? `تم تحديد ${selectedCount}` : "لا يوجد تحديد"}</span>
+            <IconButton
+              icon={RotateCcw}
+              disabled={selectedCount === 0 || rollbackPublishing.isPending}
+              onClick={() => confirmBulkRollback(selectedCount) && rollbackPublishing.mutate(selectedIds)}
+            >
+              {rollbackPublishing.isPending ? "جاري التراجع..." : "سحب/إلغاء النشر"}
+            </IconButton>
             <IconButton
               icon={Trash2}
               tone="danger"
@@ -431,6 +449,10 @@ function confirmContentDelete(title: string): boolean {
 
 function confirmBulkCleanup(count: number): boolean {
   return window.confirm(`سيتم إلغاء المهام المنتظرة وحذف ${count} عنصر محتوى غير منشور. لن يتم حذف المنشور أو المجدول. هل تريد المتابعة؟`);
+}
+
+function confirmBulkRollback(count: number): boolean {
+  return window.confirm(`سيتم سحب المنشور من ووردبريس إلى مسودة وإلغاء جدولة المجدول لعدد ${count} عنصر محدد. هل تريد المتابعة؟`);
 }
 
 function SiteSelect(props: { sites: Array<{ id: string; name: string }> }): ReactElement {
