@@ -72,8 +72,7 @@ export function AppShell(): ReactElement {
         <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/90 px-5 py-4 backdrop-blur">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-xs font-medium text-slate-500">واجهة عربية بالكامل</p>
-              <h2 className="text-lg font-semibold">إنتاج المحتوى بالذكاء الاصطناعي والنشر على ووردبريس</h2>
+              <h2 className="text-lg font-semibold">منصة انتاج المحتوى</h2>
             </div>
             <div className="flex items-center gap-2">
               <div className="rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-600">

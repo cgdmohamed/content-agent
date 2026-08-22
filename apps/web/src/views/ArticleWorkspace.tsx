@@ -1,7 +1,7 @@
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
-import { Image, Link2, RotateCcw, Save, Send } from "lucide-react";
+import { Bot, Check, ExternalLink, Image, Link2, Network, RotateCcw, Save, SearchCheck, Send, Sparkles, X } from "lucide-react";
 import { forwardRef, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -32,6 +32,7 @@ export function ArticleWorkspace(): ReactElement {
   const queryClient = useQueryClient();
   const user = useCurrentUser();
   const [scheduledAt, setScheduledAt] = useState("");
+  const [competitorModalOpen, setCompetitorModalOpen] = useState(false);
   const content = useQuery({ queryKey: ["content", id], queryFn: () => api.contentItem(id), enabled: Boolean(id), refetchInterval: 5000 });
   const selectIdea = useMutation({
     mutationFn: (ideaIndex: number) => api.selectIdea(id, ideaIndex),
@@ -163,13 +164,21 @@ export function ArticleWorkspace(): ReactElement {
             {saveArticle.isPending ? "جاري الحفظ..." : "حفظ"}
           </button>
         </div>
-        <div className="mt-6 grid gap-2 md:grid-cols-7">
+        <div className="mt-6 flex flex-col gap-3 md:flex-row md:items-center">
           {steps.map(([label, state]) => {
-            const isDone = steps.findIndex((step) => step[1] === state) <= steps.findIndex((step) => step[1] === currentState);
+            const index = steps.findIndex((step) => step[1] === state);
+            const currentIndex = steps.findIndex((step) => step[1] === currentState);
+            const isDone = index <= currentIndex;
             const isCurrent = state === currentState;
             return (
-              <div key={state} className={`rounded-md border px-3 py-2 text-sm ${isCurrent ? "border-teal bg-teal text-white" : isDone ? "border-teal/30 bg-teal/10 text-teal" : "border-slate-200 text-slate-500"}`}>
-                {label}
+              <div key={state} className="flex flex-1 items-center gap-2">
+                <div className={`flex min-w-28 flex-1 items-center gap-2 rounded-md border px-3 py-2 text-sm ${isCurrent ? "border-teal bg-teal text-white" : isDone ? "border-teal/30 bg-teal/10 text-teal" : "border-slate-200 text-slate-500"}`}>
+                  <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${isCurrent ? "bg-white text-teal" : isDone ? "bg-teal text-white" : "bg-slate-100 text-slate-500"}`}>
+                    {isDone && !isCurrent ? <Check className="h-3.5 w-3.5" /> : index + 1}
+                  </span>
+                  <span>{label}</span>
+                </div>
+                {index < steps.length - 1 ? <span className={`hidden h-px w-6 md:block ${index < currentIndex ? "bg-teal" : "bg-slate-200"}`} /> : null}
               </div>
             );
           })}
@@ -212,6 +221,7 @@ export function ArticleWorkspace(): ReactElement {
 
         <aside className="space-y-4">
           <Panel title="تحسين محركات البحث">
+            <OptimizationChecks html={content.data.draftHtml} score={score.score} />
             <Field label="الكلمة المستهدفة" value={content.data.targetKeyword} />
             <Field ref={metaRef} label="الوصف التعريفي" value={content.data.metaDescription} />
             <Field ref={categoryRef} label="التصنيف" value={content.data.category} />
@@ -269,8 +279,24 @@ export function ArticleWorkspace(): ReactElement {
           </Panel>
 
           <Panel title="بحث المنافسين">
-            {content.data.sources.length === 0 ? <p className="text-sm text-slate-500">لا توجد مصادر بحث محفوظة بعد.</p> : content.data.sources.map((source) => (
-              <a key={source} className="flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm" href={source} target="_blank" rel="noreferrer"><Link2 className="h-4 w-4" />بطاقة مصدر</a>
+            <div className="rounded-md border border-teal/20 bg-teal/5 p-3">
+              <p className="text-sm font-semibold text-teal">تحليل المنافسين</p>
+              <p className="mt-1 line-clamp-3 text-sm leading-6 text-slate-600">
+                {content.data.competitorGaps || "لا يوجد تحليل منافسين محفوظ بعد."}
+              </p>
+              <button
+                className="mt-3 inline-flex items-center gap-2 rounded-md border border-teal/30 bg-white px-3 py-2 text-sm font-semibold text-teal"
+                onClick={() => setCompetitorModalOpen(true)}
+              >
+                <SearchCheck className="h-4 w-4" />
+                عرض التحليل
+              </button>
+            </div>
+            {content.data.sources.length === 0 ? <p className="text-sm text-slate-500">لا توجد مصادر بحث محفوظة بعد.</p> : content.data.sources.map((source, index) => (
+              <a key={source} className="flex items-center justify-between gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm hover:border-teal/40 hover:bg-slate-50" href={source} target="_blank" rel="noreferrer">
+                <span className="inline-flex items-center gap-2"><Link2 className="h-4 w-4" />مصدر {index + 1}</span>
+                <ExternalLink className="h-4 w-4 text-slate-400" />
+              </a>
             ))}
           </Panel>
 
@@ -306,8 +332,8 @@ export function ArticleWorkspace(): ReactElement {
             {content.data.activity.length === 0 ? (
               <p className="text-sm text-slate-500">لا يوجد نشاط محفوظ لهذا المقال بعد.</p>
             ) : (
-              <div className="space-y-2">
-                {content.data.activity.slice(0, 12).map((event) => (
+              <div className="max-h-[360px] space-y-2 overflow-y-auto pr-1">
+                {content.data.activity.map((event) => (
                   <ActivityEvent key={`${event.type}-${event.id}`} event={event} />
                 ))}
               </div>
@@ -315,6 +341,82 @@ export function ArticleWorkspace(): ReactElement {
           </Panel>
         </aside>
       </section>
+      {competitorModalOpen ? (
+        <CompetitorModal
+          title={content.data.title}
+          gaps={content.data.competitorGaps}
+          sources={content.data.sources}
+          onClose={() => setCompetitorModalOpen(false)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function OptimizationChecks({ html, score }: { html: string; score: number }): ReactElement {
+  const plain = stripHtml(html);
+  const checks = [
+    { label: "SEO", detail: "العنوان والوصف والكلمة المستهدفة", ok: score >= 70, icon: SearchCheck },
+    { label: "AEO", detail: "إجابات واضحة وأسئلة شائعة", ok: /سؤال|أسئلة|FAQ|كيف|ما|لماذا/.test(plain), icon: Bot },
+    { label: "GEO", detail: "صياغة مناسبة للإجابات التوليدية", ok: plain.length > 1200 && /خلاصة|مقارنة|خطوات|نقاط/.test(plain), icon: Sparkles },
+    { label: "الروابط الداخلية", detail: "روابط داخلية داخل المحتوى", ok: /href=["']\/|href=["'][^"']*(?:localhost|\.sa|\.com)/.test(html), icon: Network }
+  ];
+
+  return (
+    <div className="grid gap-2 sm:grid-cols-2">
+      {checks.map((item) => {
+        const Icon = item.icon;
+        return (
+          <div key={item.label} className={`rounded-md border px-3 py-2 ${item.ok ? "border-teal/30 bg-teal/5" : "border-amber-200 bg-amber-50"}`}>
+            <div className="flex items-center gap-2">
+              <Icon className={`h-4 w-4 ${item.ok ? "text-teal" : "text-amber-700"}`} />
+              <span className="text-sm font-semibold">{item.label}</span>
+            </div>
+            <p className="mt-1 text-xs text-slate-600">{item.detail}</p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function CompetitorModal(props: { title: string; gaps: string; sources: string[]; onClose: () => void }): ReactElement {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4 py-6" role="dialog" aria-modal="true">
+      <div className="max-h-[88vh] w-full max-w-3xl overflow-hidden rounded-lg bg-white shadow-xl">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
+          <div>
+            <p className="text-sm font-medium text-teal">بحث المنافسين</p>
+            <h3 className="mt-1 text-lg font-semibold">{props.title}</h3>
+          </div>
+          <button className="rounded-md border border-slate-200 p-2 text-slate-600 hover:bg-slate-50" onClick={props.onClose} title="إغلاق">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="max-h-[calc(88vh-88px)] overflow-y-auto p-5">
+          <section>
+            <h4 className="font-semibold">ملخص الفجوات والفرص</h4>
+            <div className="mt-3 whitespace-pre-wrap rounded-md border border-slate-200 bg-slate-50 p-4 text-sm leading-7 text-slate-700">
+              {props.gaps || "لا يوجد تحليل منافسين محفوظ بعد."}
+            </div>
+          </section>
+          <section className="mt-5">
+            <h4 className="font-semibold">المصادر</h4>
+            {props.sources.length === 0 ? (
+              <p className="mt-3 text-sm text-slate-500">لا توجد مصادر محفوظة.</p>
+            ) : (
+              <div className="mt-3 grid gap-2">
+                {props.sources.map((source, index) => (
+                  <a key={source} className="flex items-center justify-between gap-3 rounded-md border border-slate-200 px-3 py-2 text-sm hover:border-teal/40 hover:bg-slate-50" href={source} target="_blank" rel="noreferrer">
+                    <span className="truncate">مصدر {index + 1}: {source}</span>
+                    <ExternalLink className="h-4 w-4 shrink-0 text-slate-400" />
+                  </a>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      </div>
     </div>
   );
 }
@@ -373,6 +475,10 @@ function translateScoreCheck(name: string): string {
     "Generic phrases": "العبارات العامة"
   };
   return labels[name] ?? name;
+}
+
+function stripHtml(value: string): string {
+  return value.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function translateScoreMessage(message: string): string {
