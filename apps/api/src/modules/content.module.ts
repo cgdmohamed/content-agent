@@ -6,7 +6,7 @@ import { DatabaseService } from "../database/database.module.js";
 import { JobQueueService, normalizeBullJobId } from "../queue/job-queue.module.js";
 import { type AuthenticatedRequest, Roles } from "../security/access-control.js";
 import { fieldLimits } from "../security/payload-limits.js";
-import { updateWordPressPostStatus, uploadWordPressMedia } from "../integrations/wordpress.js";
+import { trashWordPressPost, updateWordPressPostStatus, uploadWordPressMedia } from "../integrations/wordpress.js";
 
 const defaultContentPageSize = 25;
 const maxContentPageSize = 100;
@@ -1089,16 +1089,28 @@ class ContentService {
         title: string | null;
         topic: string;
         wordpressPostId: string | null;
+        wordpressUrl: string;
+        wordpressUsername: string;
+        wordpressApplicationPasswordEncrypted: string;
       }>(
-        `SELECT id, site_id AS "siteId", status, title, topic, wordpress_post_id AS "wordpressPostId"
-         FROM content_items
-         WHERE id = $1
+        `SELECT c.id,
+                c.site_id AS "siteId",
+                c.status,
+                c.title,
+                c.topic,
+                c.wordpress_post_id AS "wordpressPostId",
+                s.wordpress_url AS "wordpressUrl",
+                s.wordpress_username AS "wordpressUsername",
+                s.wordpress_application_password_encrypted AS "wordpressApplicationPasswordEncrypted"
+         FROM content_items c
+         JOIN sites s ON s.id = c.site_id
+         WHERE c.id = $1
          FOR UPDATE`,
         [id]
       );
       const item = current.rows[0];
       if (!item) throw new NotFoundException("عنصر المحتوى غير موجود");
-      if (!canDeleteContentStatus(item.status) || item.wordpressPostId) {
+      if (!canDeleteContentStatus(item.status)) {
         throw new BadRequestException("لا يمكن حذف محتوى منشور أو مجدول أو لديه مهمة لم تكتمل. اسحب النشر أولًا إذا كان منشورًا.");
       }
       const inFlight = await query<{ count: string }>(
@@ -1111,10 +1123,11 @@ class ContentService {
       if (Number(inFlight.rows[0]?.count ?? 0) > 0) {
         throw new BadRequestException("لا يمكن حذف محتوى لديه مهمة قيد الانتظار أو التنفيذ. ألغِ المهمة أولًا من صفحة العمليات.");
       }
+      await this.trashWordPressPostIfPresent(item);
       await query(
         `INSERT INTO audit_logs (actor_user_id, content_item_id, site_id, event_type, message, metadata)
          VALUES ($1, $2, $3, 'CONTENT_DELETED', 'تم حذف عنصر محتوى غير منشور', $4::jsonb)`,
-        [actorUserId ?? null, id, item.siteId, JSON.stringify({ title: item.title, topic: item.topic, status: item.status })]
+        [actorUserId ?? null, id, item.siteId, JSON.stringify({ title: item.title, topic: item.topic, status: item.status, wordpressPostId: item.wordpressPostId })]
       );
       await query("DELETE FROM content_items WHERE id = $1", [id]);
       return { ok: true, id };
@@ -1131,10 +1144,22 @@ class ContentService {
       title: string | null;
       topic: string;
       wordpressPostId: string | null;
+      wordpressUrl: string;
+      wordpressUsername: string;
+      wordpressApplicationPasswordEncrypted: string;
     }>(
-      `SELECT id, site_id AS "siteId", status, title, topic, wordpress_post_id AS "wordpressPostId"
-       FROM content_items
-       WHERE id = ANY($1::uuid[])`,
+      `SELECT c.id,
+              c.site_id AS "siteId",
+              c.status,
+              c.title,
+              c.topic,
+              c.wordpress_post_id AS "wordpressPostId",
+              s.wordpress_url AS "wordpressUrl",
+              s.wordpress_username AS "wordpressUsername",
+              s.wordpress_application_password_encrypted AS "wordpressApplicationPasswordEncrypted"
+       FROM content_items c
+       JOIN sites s ON s.id = c.site_id
+       WHERE c.id = ANY($1::uuid[])`,
       [uniqueIds]
     );
     const byId = new Map(rows.rows.map((row) => [row.id, row]));
@@ -1148,7 +1173,7 @@ class ContentService {
         skipped.push({ id, reason: "غير موجود" });
         continue;
       }
-      if (!canDeleteContentStatus(item.status) || item.wordpressPostId) {
+      if (!canDeleteContentStatus(item.status)) {
         skipped.push({ id, reason: "منشور أو مجدول أو لديه مهمة لم تكتمل" });
         continue;
       }
@@ -1190,10 +1215,16 @@ class ContentService {
         skipped.push({ id, reason: "لديه مهمة قيد التنفيذ الآن" });
         continue;
       }
+      try {
+        await this.trashWordPressPostIfPresent(item);
+      } catch (error) {
+        skipped.push({ id, reason: error instanceof Error ? error.message : "تعذر نقل منشور ووردبريس إلى سلة المهملات" });
+        continue;
+      }
       await this.db.query(
         `INSERT INTO audit_logs (actor_user_id, content_item_id, site_id, event_type, message, metadata)
          VALUES ($1, $2, $3, 'CONTENT_DELETED', 'تم حذف عنصر محتوى ضمن تنظيف جماعي', $4::jsonb)`,
-        [actorUserId ?? null, id, item.siteId, JSON.stringify({ title: item.title, topic: item.topic, status: item.status })]
+        [actorUserId ?? null, id, item.siteId, JSON.stringify({ title: item.title, topic: item.topic, status: item.status, wordpressPostId: item.wordpressPostId })]
       );
       await this.db.query("DELETE FROM content_items WHERE id = $1", [id]);
       deleted.push(id);
@@ -1308,6 +1339,25 @@ class ContentService {
     }
 
     return { ok: true, rolledBack, cancelledJobs, skipped };
+  }
+
+  private async trashWordPressPostIfPresent(item: {
+    siteId: string;
+    wordpressPostId: string | null;
+    wordpressUrl: string;
+    wordpressUsername: string;
+    wordpressApplicationPasswordEncrypted: string;
+  }): Promise<void> {
+    if (!item.wordpressPostId) return;
+    await trashWordPressPost(
+      {
+        id: item.siteId,
+        wordpress_url: item.wordpressUrl,
+        wordpress_username: item.wordpressUsername,
+        wordpress_application_password_encrypted: item.wordpressApplicationPasswordEncrypted
+      },
+      item.wordpressPostId
+    );
   }
 
   private async resolveIdeasCount(input: number | undefined): Promise<number> {

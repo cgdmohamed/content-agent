@@ -89,6 +89,28 @@ export async function updateWordPressPostStatus(site: InternalSiteCredentials, p
   return { id: String(data.id), status: data.status ?? status };
 }
 
+export async function trashWordPressPost(site: InternalSiteCredentials, postId: string): Promise<{ id: string; status: string }> {
+  const base = safeWordPressUrl(site.wordpress_url);
+  const password = decryptSecret(site.wordpress_application_password_encrypted);
+  const endpoint = new URL(`/wp-json/wp/v2/posts/${postId}`, base);
+  endpoint.searchParams.set("force", "false");
+  const response = await fetch(endpoint, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${site.wordpress_username}:${password}`).toString("base64")}`,
+      Accept: "application/json"
+    },
+    signal: AbortSignal.timeout(30_000)
+  });
+  const data = (await response.json()) as { deleted?: boolean; previous?: { id?: number; status?: string }; id?: number; status?: string; message?: string };
+  const id = data.previous?.id ?? data.id;
+  const status = data.previous?.status ?? data.status ?? "trash";
+  if (!response.ok || !id) {
+    throw new Error(data.message ?? `فشل نقل المقال إلى سلة ووردبريس برمز ${response.status}.`);
+  }
+  return { id: String(id), status };
+}
+
 export async function uploadWordPressMedia(
   site: InternalSiteCredentials,
   input: { bytes: Buffer; mimeType: string; filename: string; altText?: string | null }
