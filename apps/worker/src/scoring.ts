@@ -54,7 +54,7 @@ export function scoreArticle(input: { html: string; title: string; metaDescripti
     checks.push("يوجد ملخص مناسب للـ GEO");
   } else checks.push("لا يوجد ملخص GEO واضح");
 
-  if (/تواصل|احجز|ابدأ|اطلب|استشر|راسل|الخطوة التالية|اتصل/i.test(text)) {
+  if (/تواصل|احجز|ابدأ|اطلب|استشر|راسل|الخطوة التالية|اتصل|contact|book|start|request|quote|speak|plan your|next steps|call|email|whatsapp/i.test(text)) {
     score += 5;
     checks.push("يوجد CTA واضح");
   } else {

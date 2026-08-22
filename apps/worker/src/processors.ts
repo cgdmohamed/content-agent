@@ -539,8 +539,8 @@ async function fetchInternalLinkCandidates(item: ContentRecord): Promise<Interna
 
 function enforceArticleRequirements(html: string, item: ContentRecord, internalLinks: InternalLinkCandidate[] = []): string {
   let next = removeFormLikeCopy(html);
-  if (!hasCta(next)) {
-    next += `<h2>الخطوة التالية</h2><p>إذا كنت تقارن الخيارات وتريد قرارًا أدق، راجع احتياجاتك الفعلية وابدأ بتطبيق التوصيات المناسبة، أو تواصل مع فريق ${escapeHtml(item.site_name)} للحصول على توجيه يناسب حالتك.</p>`;
+  if (!hasCta(next, item.language)) {
+    next += buildCtaFallback(item);
   }
   if (countInternalLinks(next, item.wordpress_url) < 2) {
     next += buildInternalLinksFallback(item, internalLinks);
@@ -553,10 +553,18 @@ function buildInternalLinksFallback(item: ContentRecord, internalLinks: Internal
   const baseUrl = normalizeBaseUrl(item.wordpress_url);
   if (links.length < 2) {
     const keyword = encodeURIComponent(String(item.target_keyword ?? item.topic).trim());
-    links.push({ title: "زيارة الصفحة الرئيسية", url: baseUrl, keyword: null });
-    links.push({ title: "استكشاف مقالات مرتبطة", url: `${baseUrl}?s=${keyword}`, keyword: null });
+    links.push({ title: item.language === "en" ? "Visit the homepage" : "زيارة الصفحة الرئيسية", url: baseUrl, keyword: null });
+    links.push({ title: item.language === "en" ? "Explore related articles" : "استكشاف مقالات مرتبطة", url: `${baseUrl}?s=${keyword}`, keyword: null });
   }
-  return `<h2>مقالات مرتبطة</h2><ul>${links.slice(0, 2).map((link) => `<li><a href="${escapeHtml(link.url)}">${escapeHtml(link.title)}</a></li>`).join("")}</ul>`;
+  const heading = item.language === "en" ? "Related Articles" : "مقالات مرتبطة";
+  return `<h2>${heading}</h2><ul>${links.slice(0, 2).map((link) => `<li><a href="${escapeHtml(link.url)}">${escapeHtml(link.title)}</a></li>`).join("")}</ul>`;
+}
+
+function buildCtaFallback(item: ContentRecord): string {
+  if (item.language === "en") {
+    return `<h2>Next Steps</h2><p>If you are comparing your options and want a clearer decision, review your priorities and contact ${escapeHtml(item.site_name)} for guidance tailored to your trip.</p>`;
+  }
+  return `<h2>الخطوة التالية</h2><p>إذا كنت تقارن الخيارات وتريد قرارًا أدق، راجع احتياجاتك الفعلية وابدأ بتطبيق التوصيات المناسبة، أو تواصل مع فريق ${escapeHtml(item.site_name)} للحصول على توجيه يناسب حالتك.</p>`;
 }
 
 function uniqueInternalLinks(links: InternalLinkCandidate[], siteUrl: string): InternalLinkCandidate[] {
@@ -575,9 +583,11 @@ function removeFormLikeCopy(html: string): string {
     .replace(/<p>\s*(?:الاسم|اسمك|البريد الإلكتروني|رقم الهاتف|املأ النموذج|أرسل الطلب|اضغط إرسال)\s*<\/p>/gi, "");
 }
 
-function hasCta(html: string): boolean {
+function hasCta(html: string, language = "ar"): boolean {
   const text = html.replace(/<[^>]+>/g, " ");
-  return /تواصل|احجز|ابدأ|اطلب|استشر|راسل|الخطوة التالية|اتصل/i.test(text);
+  const arabicCta = /تواصل|احجز|ابدأ|اطلب|استشر|راسل|الخطوة التالية|اتصل/i;
+  const englishCta = /contact|book|start|request|quote|speak|plan your|next steps|call|email|whatsapp/i;
+  return language === "en" ? englishCta.test(text) : arabicCta.test(text) || englishCta.test(text);
 }
 
 function countInternalLinks(html: string, siteUrl: string): number {

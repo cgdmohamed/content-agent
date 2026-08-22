@@ -103,7 +103,7 @@ export function scoreContent(input: ScoreInput): ScoreResult {
       : check("warning", "GEO summary", 0, "No concise GEO summary detected")
   );
   checks.push(
-    /تواصل|احجز|ابدأ|اطلب|استشر|راسل|الخطوة التالية|اتصل/i.test(text)
+    /تواصل|احجز|ابدأ|اطلب|استشر|راسل|الخطوة التالية|اتصل|contact|book|start|request|quote|speak|plan your|next steps|call|email|whatsapp/i.test(text)
       ? check("pass", "CTA", 5, "Clear call to action is present")
       : check("warning", "CTA", 0, "No clear call to action detected")
   );
