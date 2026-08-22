@@ -1,0 +1,16 @@
+node_modules/
+.pnpm-store/
+
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+.env.*.local
+
+dist/
+apps/*/dist/
+packages/*/dist/
+
+*.log
+coverage/

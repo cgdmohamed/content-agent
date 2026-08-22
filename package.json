@@ -1,0 +1,28 @@
+{
+  "name": "content-agent",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "dev": "pnpm --parallel --filter @content-agent/api --filter @content-agent/web dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r --if-present test && vitest run scripts/__tests__/preflight.test.mjs",
+    "lint": "pnpm -r lint",
+    "verify": "pnpm typecheck && pnpm test && pnpm lint && pnpm build",
+    "secrets:generate": "node scripts/generate-secrets.mjs",
+    "legacy:migrate": "node scripts/migrate-legacy.mjs",
+    "preflight": "pnpm --filter @content-agent/config build && node scripts/preflight.mjs",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.23.1",
+    "libsodium-wrappers": "^0.8.4",
+    "mysql2": "^3.23.4",
+    "pg": "^8.23.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
