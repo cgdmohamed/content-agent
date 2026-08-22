@@ -1,5 +1,6 @@
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import type { ReactElement } from "react";
+import { AlertTriangle, CalendarClock, CheckCircle2, CircleDollarSign, FileStack, GitBranch, Globe2, MousePointerClick, Search } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { StatusBadge } from "../ui/Badge";
@@ -14,20 +15,23 @@ export function Dashboard(): ReactElement {
   if (dashboard.isError || !dashboard.data) return <ErrorState />;
 
   const cards = [
-    ["إجمالي المحتوى", dashboard.data.totalContent],
-    ["داخل خط الإنتاج", dashboard.data.pipeline],
-    ["منشور", dashboard.data.published],
-    ["يحتاج متابعة", dashboard.data.needsAttention],
-    ["مجدول", dashboard.data.scheduled],
-    ["إنفاق الذكاء الاصطناعي الشهري", `$${dashboard.data.monthlyAiSpend.toFixed(2)}`]
+    { label: "إجمالي المحتوى", value: dashboard.data.totalContent, icon: FileStack },
+    { label: "داخل خط الإنتاج", value: dashboard.data.pipeline, icon: GitBranch },
+    { label: "منشور", value: dashboard.data.published, icon: CheckCircle2 },
+    { label: "يحتاج متابعة", value: dashboard.data.needsAttention, icon: AlertTriangle },
+    { label: "مجدول", value: dashboard.data.scheduled, icon: CalendarClock },
+    { label: "إنفاق الذكاء الاصطناعي الشهري", value: `$${dashboard.data.monthlyAiSpend.toFixed(2)}`, icon: CircleDollarSign }
   ];
 
   return (
     <div className="space-y-6">
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-        {cards.map(([label, value]) => (
+        {cards.map(({ label, value, icon: Icon }) => (
           <div key={label} className="rounded-lg border border-slate-200 bg-white p-4">
-            <p className="text-xs font-medium text-slate-500">{label}</p>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs font-medium text-slate-500">{label}</p>
+              <Icon className="h-4 w-4 text-teal" />
+            </div>
             <p className="mt-2 text-2xl font-semibold">{value}</p>
           </div>
         ))}
@@ -35,7 +39,7 @@ export function Dashboard(): ReactElement {
 
       <section className="grid gap-4 lg:grid-cols-[1fr_1.2fr]">
         <div className="rounded-lg border border-slate-200 bg-white p-5">
-          <h3 className="text-base font-semibold">توزيع خط الإنتاج</h3>
+          <h3 className="flex items-center gap-2 text-base font-semibold"><GitBranch className="h-4 w-4 text-teal" />توزيع خط الإنتاج</h3>
           <div className="mt-4 h-64">
             <ResponsiveContainer>
               <PieChart>
@@ -50,7 +54,7 @@ export function Dashboard(): ReactElement {
           </div>
         </div>
         <div className="rounded-lg border border-slate-200 bg-white p-5">
-          <h3 className="text-base font-semibold">ما يحتاج متابعة</h3>
+          <h3 className="flex items-center gap-2 text-base font-semibold"><AlertTriangle className="h-4 w-4 text-saffron" />ما يحتاج متابعة</h3>
           {dashboard.data.attention.length === 0 ? <div className="mt-4"><EmptyState label="لا توجد عناصر تحتاج متابعة الآن." /></div> : (
           <div className="mt-4 divide-y divide-slate-100">
             {dashboard.data.attention.map((row) => (
@@ -68,16 +72,16 @@ export function Dashboard(): ReactElement {
       </section>
 
       <section className="rounded-lg border border-slate-200 bg-white p-5">
-        <h3 className="text-base font-semibold">حالة المواقع</h3>
+        <h3 className="flex items-center gap-2 text-base font-semibold"><Globe2 className="h-4 w-4 text-teal" />حالة المواقع</h3>
         <div className="mt-4 grid gap-3 md:grid-cols-3">
           {dashboard.data.sites.map((site) => (
             <div key={site.id} className="rounded-md border border-slate-200 p-4">
               <p className="font-medium">{site.name}</p>
               <p className="mt-1 text-sm text-slate-500">{site.wordpressUrl}</p>
               <dl className="mt-4 space-y-2 text-sm">
-                <div className="flex justify-between"><dt>ووردبريس</dt><dd>{integrationLabels[site.wordpressStatus]}</dd></div>
-                <div className="flex justify-between"><dt>رانك ماث</dt><dd>{integrationLabels[site.rankMathStatus]}</dd></div>
-                <div className="flex justify-between"><dt>بحث جوجل</dt><dd>{integrationLabels[site.gscStatus]}</dd></div>
+                <IntegrationRow label="ووردبريس" value={integrationLabels[site.wordpressStatus]} ok={site.wordpressStatus === "CONNECTED"} />
+                <IntegrationRow label="رانك ماث" value={integrationLabels[site.rankMathStatus]} ok={site.rankMathStatus === "CONNECTED"} />
+                <IntegrationRow label="بحث جوجل" value={integrationLabels[site.gscStatus]} ok={site.gscStatus === "CONNECTED"} />
               </dl>
             </div>
           ))}
@@ -85,7 +89,7 @@ export function Dashboard(): ReactElement {
       </section>
 
       <section className="rounded-lg border border-slate-200 bg-white p-5">
-        <h3 className="text-base font-semibold">فرص بحث جوجل</h3>
+        <h3 className="flex items-center gap-2 text-base font-semibold"><Search className="h-4 w-4 text-teal" />فرص بحث جوجل</h3>
         {dashboard.data.opportunities.length === 0 ? (
           <div className="mt-4"><EmptyState label="لا توجد فرص من بحث جوجل بعد." /></div>
         ) : (
@@ -117,6 +121,18 @@ export function Dashboard(): ReactElement {
           </div>
         )}
       </section>
+    </div>
+  );
+}
+
+function IntegrationRow(props: { label: string; value: string; ok: boolean }): ReactElement {
+  return (
+    <div className="flex justify-between gap-3">
+      <dt>{props.label}</dt>
+      <dd className="inline-flex items-center gap-1">
+        {props.ok ? <CheckCircle2 className="h-3.5 w-3.5 text-teal" /> : <MousePointerClick className="h-3.5 w-3.5 text-saffron" />}
+        {props.value}
+      </dd>
     </div>
   );
 }

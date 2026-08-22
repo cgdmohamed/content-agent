@@ -1,10 +1,12 @@
 import { Link } from "react-router-dom";
 import { useState, type FormEvent, type ReactElement } from "react";
+import { CheckCircle2, Copy, FilePlus2, FolderOpen, Play, Search, Trash2, XCircle } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { contentStates, nextPrimaryOperation, type ContentOperation } from "@content-agent/shared";
 import { api } from "../api/client";
 import { useCurrentUser } from "../auth";
 import { StatusBadge } from "../ui/Badge";
+import { IconButton } from "../ui/IconButton";
 import { modeLabels, operationLabels, stateLabels } from "../ui/labels";
 import { ActionError, EmptyState, ErrorState, LoadingState } from "../ui/StateViews";
 
@@ -128,7 +130,9 @@ export function ContentLibrary(): ReactElement {
           <h2 className="text-lg font-semibold">مكتبة المحتوى</h2>
           <p className="text-sm text-slate-500">فلترة حسب الموقع أو الحالة أو النمط أو التاريخ أو الدرجة أو كلمة البحث.</p>
         </div>
-        <button className="rounded-md bg-teal px-4 py-2 text-sm font-semibold text-white" onClick={() => setFormOpen((value) => !value)}>إنشاء محتوى</button>
+        <IconButton icon={formOpen ? XCircle : FilePlus2} tone="primary" onClick={() => setFormOpen((value) => !value)}>
+          {formOpen ? "إغلاق النموذج" : "إنشاء محتوى"}
+        </IconButton>
       </div>
       {formOpen ? (
         <div className="border-b border-slate-200 bg-slate-50 p-5">
@@ -145,9 +149,9 @@ export function ContentLibrary(): ReactElement {
               <Input name="contentGoal" label="هدف المحتوى" />
               <Input name="audience" label="الجمهور المستهدف" />
               <div className="md:col-span-2">
-                <button className="rounded-md bg-teal px-4 py-2 text-sm font-semibold text-white" disabled={createContent.isPending}>
+                <IconButton icon={FilePlus2} type="submit" tone="primary" disabled={createContent.isPending}>
                   {createContent.isPending ? "جاري الإنشاء..." : "حفظ وبدء المسار"}
-                </button>
+                </IconButton>
               </div>
               <div className="md:col-span-2"><ActionError error={createContent.error} /></div>
             </form>
@@ -207,9 +211,9 @@ export function ContentLibrary(): ReactElement {
                 </div>
               ) : null}
               <div className="md:col-span-2">
-                <button className="rounded-md bg-teal px-4 py-2 text-sm font-semibold text-white" disabled={createBulkContent.isPending}>
+                <IconButton icon={FilePlus2} type="submit" tone="primary" disabled={createBulkContent.isPending}>
                   {createBulkContent.isPending ? "جاري إنشاء الدفعة..." : "إنشاء الدفعة"}
-                </button>
+                </IconButton>
               </div>
               <div className="md:col-span-2"><ActionError error={createBulkContent.error} /></div>
             </form>
@@ -224,7 +228,10 @@ export function ContentLibrary(): ReactElement {
       <div className="grid gap-3 border-b border-slate-100 px-5 py-4 md:grid-cols-7">
         <label>
           <span className="text-xs font-medium text-slate-500">بحث</span>
-          <input value={search} onChange={(event) => setSearch(event.target.value)} className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm" />
+          <div className="mt-1 flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">
+            <Search className="h-4 w-4 text-slate-400" />
+            <input value={search} onChange={(event) => setSearch(event.target.value)} className="w-full bg-transparent text-sm outline-none" />
+          </div>
         </label>
         <label>
           <span className="text-xs font-medium text-slate-500">الموقع</span>
@@ -292,25 +299,30 @@ export function ContentLibrary(): ReactElement {
                 <td className="px-5 py-4">{formatDate(row.updatedAt)}</td>
                 <td className="px-5 py-4">
                   <div className="flex gap-2">
-                    <Link className="rounded-md border border-slate-200 px-3 py-1.5 font-medium" to={`/content/${row.id}`}>فتح</Link>
+                    <Link className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-3 py-1.5 font-medium hover:border-teal/40 hover:bg-slate-50" to={`/content/${row.id}`} title="فتح">
+                      <FolderOpen className="h-4 w-4" />فتح
+                    </Link>
                     {renderPrimaryAction(row.id, nextPrimaryOperation(row.state), runOperation.isPending, user.role === "ADMIN", (operation) =>
                       runOperation.mutate({ id: row.id, operation })
                     )}
-                    <button
-                      className="rounded-md border border-slate-200 px-3 py-1.5 font-medium"
+                    <IconButton
+                      icon={Copy}
+                      className="min-h-8 px-3 py-1.5"
                       disabled={duplicateContent.isPending}
                       onClick={() => duplicateContent.mutate(row.id)}
                     >
                       نسخ
-                    </button>
+                    </IconButton>
                     {user.role === "ADMIN" && canDeleteContent(row.state) ? (
-                      <button
-                        className="rounded-md border border-red-200 px-3 py-1.5 font-medium text-red-700"
+                      <IconButton
+                        icon={Trash2}
+                        tone="danger"
+                        className="min-h-8 px-3 py-1.5"
                         disabled={deleteContent.isPending}
                         onClick={() => confirmContentDelete(row.title) && deleteContent.mutate(row.id)}
                       >
                         حذف
-                      </button>
+                      </IconButton>
                     ) : null}
                   </div>
                 </td>
@@ -352,18 +364,18 @@ function renderPrimaryAction(
   isAdmin: boolean,
   run: (operation: ContentOperation) => void
 ): ReactElement {
-  if (!operation) return <span className="px-3 py-1.5 text-slate-500">مكتمل</span>;
+  if (!operation) return <span className="inline-flex items-center gap-2 px-3 py-1.5 text-slate-500"><CheckCircle2 className="h-4 w-4" />مكتمل</span>;
   if ((operation === "APPROVE" || operation === "PUBLISH") && !isAdmin) return <span className="px-3 py-1.5 text-slate-500">بانتظار المدير</span>;
   if (operation === "SELECT_IDEA") {
-    return <Link className="rounded-md border border-slate-200 px-3 py-1.5 font-medium" to={`/content/${id}`}>اختيار فكرة</Link>;
+    return <Link className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-3 py-1.5 font-medium hover:border-teal/40 hover:bg-slate-50" to={`/content/${id}`}><FolderOpen className="h-4 w-4" />اختيار فكرة</Link>;
   }
   if (operation === "SKIP_IMAGE" || operation === "SCHEDULE") {
-    return <Link className="rounded-md border border-slate-200 px-3 py-1.5 font-medium" to={`/content/${id}`}>{operationLabels[operation]}</Link>;
+    return <Link className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-3 py-1.5 font-medium hover:border-teal/40 hover:bg-slate-50" to={`/content/${id}`}><FolderOpen className="h-4 w-4" />{operationLabels[operation]}</Link>;
   }
   return (
-    <button className="rounded-md border border-slate-200 px-3 py-1.5 font-medium" disabled={pending} onClick={() => run(operation)}>
+    <IconButton icon={Play} className="min-h-8 px-3 py-1.5" disabled={pending} onClick={() => run(operation)}>
       {operationLabels[operation]}
-    </button>
+    </IconButton>
   );
 }
 

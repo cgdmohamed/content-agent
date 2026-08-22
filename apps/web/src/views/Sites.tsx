@@ -1,10 +1,11 @@
-import { Globe2, PlugZap } from "lucide-react";
+import { BarChart3, Edit3, FilePlus2, Globe2, Power, RefreshCw, SearchCheck, Settings2, SquarePen, Wifi } from "lucide-react";
 import { useState, type FormEvent, type ReactElement } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { SiteDto } from "../api/client";
 import { useCurrentUser } from "../auth";
+import { IconButton } from "../ui/IconButton";
 import { integrationLabels } from "../ui/labels";
 import { ActionError, EmptyState, ErrorState, LoadingState } from "../ui/StateViews";
 
@@ -94,7 +95,7 @@ export function Sites(): ReactElement {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">المواقع</h2>
-        {isAdmin ? <button className="rounded-md bg-teal px-4 py-2 text-sm font-semibold text-white" onClick={() => setFormOpen((value) => !value)}>إضافة موقع</button> : null}
+        {isAdmin ? <IconButton icon={FilePlus2} tone="primary" onClick={() => setFormOpen((value) => !value)}>إضافة موقع</IconButton> : null}
       </div>
       {formOpen && isAdmin ? (
         <form onSubmit={submit} noValidate className="grid gap-3 rounded-lg border border-slate-200 bg-white p-5 md:grid-cols-2">
@@ -124,7 +125,7 @@ export function Sites(): ReactElement {
         <form onSubmit={submitEdit} noValidate className="grid gap-3 rounded-lg border border-slate-200 bg-white p-5 md:grid-cols-2">
           <div className="md:col-span-2 flex items-center justify-between">
             <h3 className="font-semibold">تعديل {editingSite.name}</h3>
-            <button type="button" className="rounded-md border border-slate-200 px-3 py-1.5 text-sm" onClick={() => setEditingSite(null)}>إغلاق</button>
+            <IconButton icon={Power} tone="ghost" onClick={() => setEditingSite(null)}>إغلاق</IconButton>
           </div>
           <Input name="name" label="اسم الموقع" defaultValue={editingSite.name} required />
           <Input name="wordpressUrl" label="رابط ووردبريس" defaultValue={editingSite.wordpressUrl} required />
@@ -170,24 +171,22 @@ export function Sites(): ReactElement {
             <div className="mt-5 flex flex-wrap gap-2">
               {isAdmin ? (
                 <>
-                  <button className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm" onClick={() => testWp.mutate(site.id)}>
-                    <PlugZap className="h-4 w-4" />اختبار ووردبريس
-                  </button>
-                  <button className="rounded-md border border-slate-200 px-3 py-2 text-sm" onClick={() => setEditingSite(site)}>تعديل</button>
-                  <button className="rounded-md border border-slate-200 px-3 py-2 text-sm" onClick={() => testRankMath.mutate(site.id)}>اختبار رانك ماث</button>
-                  <button className="rounded-md border border-slate-200 px-3 py-2 text-sm" onClick={() => testGsc.mutate(site.id)}>اختبار بحث جوجل</button>
-                  <button className="rounded-md border border-slate-200 px-3 py-2 text-sm" onClick={() => syncGsc.mutate(site.id)}>مزامنة بحث جوجل</button>
-                  <button
-                    className="rounded-md border border-slate-200 px-3 py-2 text-sm"
+                  <IconButton icon={Wifi} onClick={() => testWp.mutate(site.id)}>اختبار ووردبريس</IconButton>
+                  <IconButton icon={SquarePen} onClick={() => setEditingSite(site)}>تعديل</IconButton>
+                  <IconButton icon={Settings2} onClick={() => testRankMath.mutate(site.id)}>اختبار رانك ماث</IconButton>
+                  <IconButton icon={SearchCheck} onClick={() => testGsc.mutate(site.id)}>اختبار بحث جوجل</IconButton>
+                  <IconButton icon={RefreshCw} onClick={() => syncGsc.mutate(site.id)}>مزامنة بحث جوجل</IconButton>
+                  <IconButton
+                    icon={Power}
                     disabled={updateSite.isPending}
                     onClick={() => updateSite.mutate({ id: site.id, body: { status: site.status === "ACTIVE" ? "DISABLED" : "ACTIVE" } })}
                   >
                     {site.status === "ACTIVE" ? "تعطيل" : "تفعيل"}
-                  </button>
+                  </IconButton>
                 </>
               ) : null}
-              <Link className="rounded-md border border-slate-200 px-3 py-2 text-sm" to="/content">إنشاء محتوى</Link>
-              {isAdmin ? <Link className="rounded-md border border-slate-200 px-3 py-2 text-sm" to={`/sites/${site.id}/report`}>عرض التقرير</Link> : null}
+              <Link className="inline-flex min-h-9 items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm font-semibold hover:border-teal/40 hover:bg-slate-50" to="/content"><Edit3 className="h-4 w-4" />إنشاء محتوى</Link>
+              {isAdmin ? <Link className="inline-flex min-h-9 items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm font-semibold hover:border-teal/40 hover:bg-slate-50" to={`/sites/${site.id}/report`}><BarChart3 className="h-4 w-4" />عرض التقرير</Link> : null}
             </div>
             {isAdmin ? <div className="mt-3 space-y-2">
               <ActionError error={testWp.variables === site.id ? testWp.error : null} />
