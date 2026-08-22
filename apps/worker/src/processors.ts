@@ -139,6 +139,7 @@ async function publishToWordPress(contentItemId: string): Promise<OperationResul
   if (!item.title || !item.draft_html) throw new Error("لا يمكن النشر بدون عنوان ومحتوى.");
   const selected = item.selected_idea ?? {};
   const tags = asStringArray(item.tags);
+  const focusKeyword = String(selected.targetKeyword ?? selected.target_keyword ?? item.target_keyword ?? "");
   const result = await publishPost(
     {
       wordpress_url: item.wordpress_url,
@@ -150,7 +151,8 @@ async function publishToWordPress(contentItemId: string): Promise<OperationResul
       title: item.title,
       contentHtml: item.draft_html,
       metaDescription: item.meta_description,
-      focusKeyword: String(selected.targetKeyword ?? selected.target_keyword ?? item.target_keyword ?? ""),
+      focusKeyword,
+      slug: slugFromKeyword(focusKeyword || item.title || item.topic),
       category: item.category,
       tags,
       featuredMediaId: item.wordpress_media_id,
@@ -229,6 +231,7 @@ async function generateIdeas(contentItemId: string): Promise<OperationResult> {
     `اللغة: ${item.language}`,
     `نية البحث: ${item.search_intent ?? "تلقائية"}`,
     `الموجز التحريري: ${JSON.stringify(item.editorial_brief)}`,
+    "اجعل targetKeyword قصيرة وطبيعية وقابلة للاستخدام حرفيًا في SEO title وmeta description والـ URL، ويفضل 4 إلى 7 كلمات بدون حروف زائدة.",
     'أعد JSON فقط بالشكل: [{"title":"...","targetKeyword":"...","angle":"..."}]'
   ].join("\n");
   const result = await generateText({ contentItemId, operation: "GENERATE_IDEAS", prompt, preferred: ["perplexity", "openai", "anthropic"] });
@@ -327,19 +330,23 @@ async function writeDraft(contentItemId: string): Promise<OperationResult> {
     "- أضف CTA طبيعي في نهاية المقال بدون نموذج، مثل دعوة للتواصل أو طلب استشارة أو قراءة مقال مرتبط.",
     "- أضف قسم أسئلة شائعة واضح للإجابة على أسئلة المستخدمين AEO.",
     "- أضف فقرة ملخص تنفيذي أو إجابة مباشرة قابلة للظهور في الإجابات التوليدية GEO.",
+    "- يجب أن تظهر الكلمة المستهدفة حرفيًا في SEO title وmeta description وأول فقرة وواحد من عناوين H2/H3 ومحتوى المقال.",
+    "- اجعل العنوان 55-60 حرفًا تقريبًا، والوصف التعريفي 140-160 حرفًا، وابدأ العنوان بالكلمة المستهدفة قدر الإمكان.",
+    "- اجعل imageAlt يحتوي الكلمة المستهدفة حرفيًا.",
     "- أضف رابطين داخليين على الأقل من قائمة الروابط الداخلية المرشحة فقط، وبنص anchor طبيعي داخل الفقرات لا في قائمة منفصلة إلا عند الضرورة.",
     "- إذا كانت القائمة لا تحتوي روابط كافية استخدم رابط الصفحة الرئيسية ورابط بحث داخل الموقع كحل أخير فقط.",
     "- استخدم جدول مقارنة HTML عند وجود بدائل أو مقارنة.",
     'أعد JSON فقط بالشكل: {"title":"...","metaDescription":"...","contentHtml":"...","suggestedTags":["..."],"category":"...","imagePrompt":"...","imageAlt":"..."}'
   ].join("\n\n");
   const result = await generateText({ contentItemId, operation: "WRITE_DRAFT", prompt, preferred: ["anthropic", "openai"], maxTokens: 6000 });
-  const article = parseArticle(result.text);
+  const focusKeyword = String(idea.targetKeyword ?? idea.target_keyword ?? item.target_keyword ?? "");
+  const article = optimizeArticleForRankMath(parseArticle(result.text), item, focusKeyword);
   const contentHtml = enforceArticleRequirements(article.contentHtml, item, internalLinks);
   const score = scoreArticle({
     html: contentHtml,
     title: article.title,
     metaDescription: article.metaDescription,
-    targetKeyword: String(idea.targetKeyword ?? idea.target_keyword ?? ""),
+    targetKeyword: focusKeyword,
     imageAlt: article.imageAlt,
     siteUrl: item.wordpress_url
   });
@@ -378,13 +385,14 @@ async function reviewDraft(contentItemId: string): Promise<OperationResult> {
     `روابط داخلية مرشحة من نفس الموقع: ${JSON.stringify(internalLinks)}`,
     "ركز على نية البحث، الوضوح، إزالة التكرار، تحسين العناوين، الوصف التعريفي، والأسئلة الشائعة.",
     "ارفع جودة المقال إلى معيار SEO/AEO/GEO: إجابة مباشرة، عمق كاف، قسم أسئلة شائعة، CTA طبيعي، وروابط داخلية من قائمة الروابط المرشحة.",
+    "تأكد أن الكلمة المستهدفة تظهر حرفيًا في العنوان والوصف وأول فقرة وH2/H3 وALT، مع عنوان لا يتجاوز 60 حرفًا ووصف لا يتجاوز 160 حرفًا.",
     "احذف أي نصوص تبدو كحقول نموذج أو placeholders مثل الاسم والبريد ورقم الهاتف واملأ النموذج.",
     `لا يقل الناتج النهائي عن 1200 كلمة إذا كان المقال أقصر من ذلك، وبنفس لغة الموقع فقط: ${languageName(item.language)}.`,
     item.draft_html,
     'أعد JSON فقط بالشكل: {"title":"...","metaDescription":"...","contentHtml":"...","suggestedTags":["..."],"category":"...","imagePrompt":"...","imageAlt":"..."}'
   ].join("\n\n");
   const result = await generateText({ contentItemId, operation: "REVIEW_DRAFT", prompt, preferred: ["anthropic", "openai"], maxTokens: 6000 });
-  const article = parseArticle(result.text);
+  const article = optimizeArticleForRankMath(parseArticle(result.text), item, item.target_keyword ?? "");
   const contentHtml = enforceArticleRequirements(article.contentHtml, item, internalLinks);
   const score = scoreArticle({
     html: contentHtml,
@@ -441,7 +449,7 @@ async function optimizeLinksAndCta(contentItemId: string): Promise<OperationResu
     'أعد JSON فقط بالشكل: {"title":"...","metaDescription":"...","contentHtml":"...","suggestedTags":["..."],"category":"...","imagePrompt":"...","imageAlt":"..."}'
   ].join("\n\n");
   const result = await generateText({ contentItemId, operation: "OPTIMIZE_LINKS", prompt, preferred: ["anthropic", "openai"], maxTokens: 5000 });
-  const article = parseArticle(result.text);
+  const article = optimizeArticleForRankMath(parseArticle(result.text), item, item.target_keyword ?? "");
   const contentHtml = enforceArticleRequirements(article.contentHtml, item, internalLinks);
   const score = scoreArticle({
     html: contentHtml,
@@ -511,6 +519,90 @@ function parseArticle(value: string): {
     imagePrompt: String(parsed.imagePrompt ?? parsed.image_prompt ?? "").trim(),
     imageAlt: String(parsed.imageAlt ?? parsed.image_alt ?? "").trim()
   };
+}
+
+type ParsedArticle = ReturnType<typeof parseArticle>;
+
+function optimizeArticleForRankMath(article: ParsedArticle, item: ContentRecord, focusKeyword: string): ParsedArticle {
+  const keyword = focusKeyword.trim();
+  if (!keyword) return article;
+  const displayKeyword = item.language === "en" ? titleCaseKeyword(keyword) : keyword;
+  let contentHtml = article.contentHtml;
+  if (!containsPhrase(stripHtml(contentHtml).slice(0, 500), keyword)) {
+    const intro = item.language === "en"
+      ? `<p>${displayKeyword} is the key question this guide answers with practical, up-to-date advice.</p>`
+      : `<p>${displayKeyword} هي النقطة الأساسية التي يجيب عنها هذا الدليل بنصائح عملية وواضحة.</p>`;
+    contentHtml = `${intro}${contentHtml}`;
+  }
+  if (!headingContainsPhrase(contentHtml, keyword)) {
+    const heading = item.language === "en" ? `${displayKeyword}: Key Takeaways` : `${displayKeyword}: أهم النقاط`;
+    contentHtml = contentHtml.replace(/<\/p>/i, `</p><h2>${escapeHtml(heading)}</h2>`);
+  }
+  if (countPhrase(stripHtml(contentHtml), keyword) < 2) {
+    const sentence = item.language === "en"
+      ? `<p>For travellers asking about ${escapeHtml(displayKeyword)}, the safest decision comes from matching current travel advice with your route, timing and comfort level.</p>`
+      : `<p>عند البحث عن ${escapeHtml(displayKeyword)}، يكون القرار الأفضل مبنيًا على مقارنة الاحتياج الفعلي بالخيارات المتاحة.</p>`;
+    contentHtml += sentence;
+  }
+  return {
+    ...article,
+    title: buildSeoTitle(article.title, displayKeyword, item.language),
+    metaDescription: buildMetaDescription(article.metaDescription, displayKeyword, item.language),
+    contentHtml: sanitizeArticleHtml(contentHtml),
+    imageAlt: containsPhrase(article.imageAlt, keyword) ? article.imageAlt : displayKeyword
+  };
+}
+
+function buildSeoTitle(title: string, keyword: string, language: string): string {
+  if (containsPhrase(title, keyword) && title.length <= 60) return title;
+  const suffix = language === "en" ? "Practical Guide" : "دليل عملي";
+  const candidate = `${keyword}: ${suffix}`;
+  if (candidate.length <= 60) return candidate;
+  return truncateText(keyword, 60);
+}
+
+function buildMetaDescription(meta: string, keyword: string, language: string): string {
+  if (containsPhrase(meta, keyword) && meta.length >= 120 && meta.length <= 160) return meta;
+  const candidate = language === "en"
+    ? `${keyword}: practical tips, costs, safety notes and next steps to help you plan with confidence.`
+    : `${keyword}: نصائح عملية وخطوات واضحة تساعدك على المقارنة واتخاذ قرار مناسب بثقة.`;
+  return truncateText(candidate, 160);
+}
+
+function headingContainsPhrase(html: string, keyword: string): boolean {
+  return [...html.matchAll(/<h[2-4][^>]*>([\s\S]*?)<\/h[2-4]>/gi)].some((match) => containsPhrase(stripHtml(match[1] ?? ""), keyword));
+}
+
+function containsPhrase(value: string, phrase: string): boolean {
+  return normalizeText(value).includes(normalizeText(phrase));
+}
+
+function countPhrase(value: string, phrase: string): number {
+  const normalized = normalizeText(value);
+  const needle = normalizeText(phrase);
+  if (!needle) return 0;
+  return normalized.split(needle).length - 1;
+}
+
+function normalizeText(value: string): string {
+  return value.toLowerCase().replace(/[\u064B-\u065F]/g, "").replace(/[^a-z0-9\u0600-\u06FF]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function stripHtml(value: string): string {
+  return value.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function titleCaseKeyword(value: string): string {
+  const small = new Set(["a", "an", "and", "as", "at", "for", "from", "in", "of", "on", "or", "the", "to", "with"]);
+  return value
+    .split(/\s+/)
+    .map((word, index) => (index > 0 && small.has(word.toLowerCase()) ? word.toLowerCase() : word.charAt(0).toUpperCase() + word.slice(1)))
+    .join(" ");
+}
+
+function truncateText(value: string, max: number): string {
+  if (value.length <= max) return value;
+  return value.slice(0, max).replace(/\s+\S*$/, "").trim();
 }
 
 async function fetchInternalLinkCandidates(item: ContentRecord): Promise<InternalLinkCandidate[]> {
@@ -682,6 +774,18 @@ function normalizeBaseUrl(value: string): string {
   } catch {
     return value;
   }
+}
+
+function slugFromKeyword(value: string): string {
+  return value
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\u0600-\u06FF]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 75)
+    .replace(/-$/g, "") || "article";
 }
 
 function escapeHtml(value: string): string {

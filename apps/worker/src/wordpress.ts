@@ -14,6 +14,7 @@ export interface WordPressPostInput {
   contentHtml: string;
   metaDescription?: string | null;
   focusKeyword?: string | null;
+  slug?: string | null;
   category?: string | null;
   tags: string[];
   featuredMediaId?: string | null;
@@ -48,6 +49,7 @@ export async function publishPost(site: WordPressSite, input: WordPressPostInput
     title: input.title,
     content: contentHtml,
     status: statusAndDate.status,
+    slug: input.slug?.trim() || undefined,
     meta: {
       rank_math_title: input.title,
       rank_math_description: input.metaDescription ?? "",
