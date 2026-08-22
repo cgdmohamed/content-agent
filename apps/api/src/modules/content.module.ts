@@ -174,6 +174,13 @@ export interface ContentListFilter {
   offset: number;
 }
 
+export interface ContentListResponse {
+  items: Array<Record<string, unknown>>;
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 interface ContentRow {
   id: string;
   site_id: string;
@@ -292,7 +299,7 @@ class ContentService {
     private readonly audit: AuditService
   ) {}
 
-  async list(query: ContentListQuery = {}): Promise<{ items: Array<Record<string, unknown>>; total: number; page: number; pageSize: number }> {
+  async list(query: ContentListQuery = {}): Promise<ContentListResponse> {
     const filter = buildContentListFilter(query);
     const [result, total] = await Promise.all([
       this.db.query<ContentRow>(
@@ -1509,7 +1516,7 @@ class ContentController {
   constructor(private readonly content: ContentService) {}
 
   @Get()
-  list(@Query() query: ContentListQuery): Promise<Array<Record<string, unknown>>> {
+  list(@Query() query: ContentListQuery): Promise<ContentListResponse> {
     return this.content.list(query);
   }
 
