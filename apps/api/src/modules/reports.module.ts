@@ -1,6 +1,6 @@
 import { Controller, Get, Module, Param, Query } from "@nestjs/common";
-import { DatabaseService } from "../database/database.module";
-import { Roles } from "../security/access-control";
+import { DatabaseService } from "../database/database.module.js";
+import { Roles } from "../security/access-control.js";
 
 interface ContentQualityRow {
   id: string;

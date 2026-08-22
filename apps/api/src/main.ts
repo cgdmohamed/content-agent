@@ -5,11 +5,11 @@ import { json, urlencoded } from "express";
 import { NestFactory } from "@nestjs/core";
 import { ValidationPipe } from "@nestjs/common";
 import { loadEnv } from "@content-agent/config";
-import { AppModule } from "./modules/app.module";
-import { ApiExceptionFilter } from "./security/api-exception-filter";
-import { formBodyLimit, jsonBodyLimit } from "./security/payload-limits";
-import { requestIdMiddleware } from "./security/request-id";
-import { validationExceptionFactory } from "./security/validation-errors";
+import { AppModule } from "./modules/app.module.js";
+import { ApiExceptionFilter } from "./security/api-exception-filter.js";
+import { formBodyLimit, jsonBodyLimit } from "./security/payload-limits.js";
+import { requestIdMiddleware } from "./security/request-id.js";
+import { validationExceptionFactory } from "./security/validation-errors.js";
 
 async function bootstrap(): Promise<void> {
   const env = loadEnv();

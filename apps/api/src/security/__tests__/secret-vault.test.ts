@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decryptSecret, encryptSecret } from "../secret-vault";
+import { decryptSecret, encryptSecret } from "../secret-vault.js";
 
 process.env.ENCRYPTION_KEY_BASE64 = Buffer.alloc(32, 7).toString("base64");
 

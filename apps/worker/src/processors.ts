@@ -1,11 +1,11 @@
-import { appendAudit, query } from "./db";
-import { generateText } from "./ai";
-import { sanitizeArticleHtml } from "./html-sanitizer";
-import { asStringArray, extractJson } from "./json";
-import { scoreArticle } from "./scoring";
-import { generateGeminiImage } from "./gemini-image";
-import { fetchGscQueries, type GscSite } from "./google-search-console";
-import { publishPost, uploadMedia } from "./wordpress";
+import { appendAudit, query } from "./db.js";
+import { generateText } from "./ai.js";
+import { sanitizeArticleHtml } from "./html-sanitizer.js";
+import { asStringArray, extractJson } from "./json.js";
+import { scoreArticle } from "./scoring.js";
+import { generateGeminiImage } from "./gemini-image.js";
+import { fetchGscQueries, type GscSite } from "./google-search-console.js";
+import { publishPost, uploadMedia } from "./wordpress.js";
 
 interface ContentRecord {
   id: string;

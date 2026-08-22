@@ -1,6 +1,6 @@
 import { createCipheriv, randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { decryptSecret } from "../secrets";
+import { decryptSecret } from "../secrets.js";
 
 process.env.ENCRYPTION_KEY_BASE64 = Buffer.alloc(32, 7).toString("base64");
 

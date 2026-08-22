@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ConflictException } from "@nestjs/common";
-import { insertUserOrThrowConflict, isUniqueViolation, publicUserUpdateFields, usersListLimit } from "../users.module";
+import { insertUserOrThrowConflict, isUniqueViolation, publicUserUpdateFields, usersListLimit } from "../users.module.js";
 
 describe("user audit field filtering", () => {
   it("does not expose password update field names in audit metadata", () => {

@@ -1,6 +1,6 @@
 import { Controller, Get, Module } from "@nestjs/common";
 import type { ContentState } from "@content-agent/shared";
-import { DatabaseService } from "../database/database.module";
+import { DatabaseService } from "../database/database.module.js";
 
 export const dashboardSitesLimit = 24;
 

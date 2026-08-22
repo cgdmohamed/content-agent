@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertActiveContentSite, buildContentListFilter, buildJobId, canDeleteContentStatus, canRunOperation, clampNumber, contentVersionSummary, delayUntil, duplicateInitialState, duplicateTitle, isActiveSiteStatus, isPublishTime, mergeContentActivity, normalizedDelayMs, parseBulkTopics, parseFutureScheduleDate, retryOperationForFailedContent, retryStateForOperation, scheduledPublishDate } from "../content.module";
+import { assertActiveContentSite, buildContentListFilter, buildJobId, canDeleteContentStatus, canRunOperation, clampNumber, contentVersionSummary, delayUntil, duplicateInitialState, duplicateTitle, isActiveSiteStatus, isPublishTime, mergeContentActivity, normalizedDelayMs, parseBulkTopics, parseFutureScheduleDate, retryOperationForFailedContent, retryStateForOperation, scheduledPublishDate } from "../content.module.js";
 
 describe("content operation rules", () => {
   it("allows only the next pipeline operation", () => {
@@ -33,8 +33,9 @@ describe("content operation rules", () => {
   });
 
   it("builds job ids that keep the operation and entity traceable", () => {
-    const jobId = buildJobId("GENERATE_IMAGE", "content-1");
-    expect(jobId.startsWith("GENERATE_IMAGE:content-1:")).toBe(true);
+    const jobId = buildJobId("GENERATE_IMAGE:extra", "content 1/مرحبا", "retry:1");
+    expect(jobId.startsWith("GENERATE_IMAGE-extra-content-1-")).toBe(true);
+    expect(jobId).not.toMatch(/[:\s/]/);
   });
 
   it("keeps manual idea requests within the production settings limit", () => {

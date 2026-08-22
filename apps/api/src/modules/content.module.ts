@@ -1,11 +1,11 @@
 import { BadRequestException, Body, Controller, Delete, Get, Injectable, Module, NotFoundException, Param, Patch, Post, Query, Req } from "@nestjs/common";
 import { ArrayMaxSize, IsArray, IsBoolean, IsDateString, IsInt, IsOptional, IsString, Max, MaxLength, Min } from "class-validator";
 import { findDuplicateMatches, nextPrimaryOperation, sanitizeArticleHtml, scoreContent, type ContentState } from "@content-agent/shared";
-import { AuditService, sanitizeAuditMetadata } from "../audit/audit.module";
-import { DatabaseService } from "../database/database.module";
-import { JobQueueService } from "../queue/job-queue.module";
-import { type AuthenticatedRequest, Roles } from "../security/access-control";
-import { fieldLimits } from "../security/payload-limits";
+import { AuditService, sanitizeAuditMetadata } from "../audit/audit.module.js";
+import { DatabaseService } from "../database/database.module.js";
+import { JobQueueService, normalizeBullJobId } from "../queue/job-queue.module.js";
+import { type AuthenticatedRequest, Roles } from "../security/access-control.js";
+import { fieldLimits } from "../security/payload-limits.js";
 
 const contentListLimit = 200;
 
@@ -603,7 +603,7 @@ class ContentService {
     );
     if (inFlight.rowCount) return { statusCode: 202, jobId: inFlight.rows[0]!.bull_job_id, contentItemId: id };
 
-    const jobId = `${operation}:${id}:retry:${Date.now()}`;
+    const jobId = buildJobId(operation, id, "retry");
     await this.queue.enqueue(queueName, operation, { contentItemId: id, operation }, jobId);
     await this.db.query(
       `INSERT INTO job_runs (content_item_id, operation, queue_name, bull_job_id, status)
@@ -1339,8 +1339,8 @@ function parseDateOnly(value?: string): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-export function buildJobId(operation: string, entityId: string): string {
-  return `${operation}:${entityId}:${Date.now()}`;
+export function buildJobId(operation: string, entityId: string, suffix?: string): string {
+  return normalizeBullJobId([operation, entityId, suffix, Date.now()].filter(Boolean).join("-"));
 }
 
 function queueForOperation(operation: string): string {

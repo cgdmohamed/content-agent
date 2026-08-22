@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readinessHttpStatus, readinessStatus } from "../health.module";
+import { readinessHttpStatus, readinessStatus } from "../health.module.js";
 
 describe("health readiness", () => {
   it("requires PostgreSQL and Redis to be ready", () => {

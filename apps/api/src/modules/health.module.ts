@@ -1,13 +1,13 @@
 import { Controller, Get, HttpStatus, Injectable, Module, OnModuleDestroy, Res } from "@nestjs/common";
-import IORedis from "ioredis";
+import { Redis } from "ioredis";
 import type { Response } from "express";
 import { loadEnv } from "@content-agent/config";
-import { DatabaseService } from "../database/database.module";
-import { Public } from "../security/access-control";
+import { DatabaseService } from "../database/database.module.js";
+import { Public } from "../security/access-control.js";
 
 @Injectable()
 class RedisHealthService implements OnModuleDestroy {
-  private readonly client = new IORedis(loadEnv().REDIS_URL, {
+  private readonly client = new Redis(loadEnv().REDIS_URL, {
     lazyConnect: true,
     maxRetriesPerRequest: 1,
     connectTimeout: 2000,

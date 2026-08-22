@@ -2,13 +2,13 @@ import { Body, Controller, Get, HttpException, HttpStatus, Injectable, Module, O
 import { IsEmail, IsString, MaxLength, MinLength } from "class-validator";
 import bcrypt from "bcryptjs";
 import type { CookieOptions, Request, Response } from "express";
-import { AuditService } from "../audit/audit.module";
-import { DatabaseService } from "../database/database.module";
-import { Public } from "../security/access-control";
-import { LoginRateLimiter } from "../security/login-rate-limit";
-import { fieldLimits } from "../security/payload-limits";
-import { passwordPolicyIssues, strongPasswordMessage } from "../security/password-policy";
-import { createSessionCookie, parseSessionCookie, type SessionUser } from "../security/session-cookie";
+import { AuditService } from "../audit/audit.module.js";
+import { DatabaseService } from "../database/database.module.js";
+import { Public } from "../security/access-control.js";
+import { LoginRateLimiter } from "../security/login-rate-limit.js";
+import { fieldLimits } from "../security/payload-limits.js";
+import { passwordPolicyIssues, strongPasswordMessage } from "../security/password-policy.js";
+import { createSessionCookie, parseSessionCookie, type SessionUser } from "../security/session-cookie.js";
 
 class LoginDto {
   @IsEmail()

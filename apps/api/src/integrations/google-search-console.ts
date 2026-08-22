@@ -1,5 +1,5 @@
 import { createSign } from "node:crypto";
-import { decryptSecret } from "../security/secret-vault";
+import { decryptSecret } from "../security/secret-vault.js";
 
 export interface GscSiteCredentials {
   id: string;

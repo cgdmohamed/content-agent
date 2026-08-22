@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertBudgetLimits, effectiveHardLimit, maskSecretTail } from "../settings.module";
+import { assertBudgetLimits, effectiveHardLimit, maskSecretTail } from "../settings.module.js";
 
 describe("settings secret masking", () => {
   it("shows only a safe key tail", () => {

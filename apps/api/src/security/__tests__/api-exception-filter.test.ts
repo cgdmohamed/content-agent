@@ -1,6 +1,6 @@
 import { BadRequestException, InternalServerErrorException } from "@nestjs/common";
 import { describe, expect, it } from "vitest";
-import { toApiErrorResponse, withRequestId } from "../api-exception-filter";
+import { toApiErrorResponse, withRequestId } from "../api-exception-filter.js";
 
 describe("api exception filter", () => {
   it("keeps expected Arabic HTTP exception messages", () => {

@@ -1,6 +1,6 @@
-import { sanitizeArticleHtml } from "./html-sanitizer";
-import { decryptSecret } from "./secrets";
-import { safeExternalUrl } from "./url-safety";
+import { sanitizeArticleHtml } from "./html-sanitizer.js";
+import { decryptSecret } from "./secrets.js";
+import { safeExternalUrl } from "./url-safety.js";
 
 export interface WordPressSite {
   wordpress_url: string;

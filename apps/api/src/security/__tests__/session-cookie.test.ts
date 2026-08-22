@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { createSessionCookie, parseSessionCookie } from "../session-cookie";
-import { isTrustedWriteSource } from "../access-control";
+import { createSessionCookie, parseSessionCookie } from "../session-cookie.js";
+import { isTrustedWriteSource } from "../access-control.js";
 
 process.env.SESSION_SECRET = "test-secret-value-with-more-than-32-characters";
 const testSecret = process.env.SESSION_SECRET;

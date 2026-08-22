@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertSiteActive, isSiteActive, publicAuditFields, safeGscPropertyInput, safeGscServiceAccountInput, safeWordPressInputUrl, sitesListLimit } from "../sites.module";
+import { assertSiteActive, isSiteActive, publicAuditFields, safeGscPropertyInput, safeGscServiceAccountInput, safeWordPressInputUrl, sitesListLimit } from "../sites.module.js";
 
 describe("audit metadata field filtering", () => {
   it("does not expose password or JSON secret field names for site updates", () => {

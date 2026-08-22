@@ -1,5 +1,5 @@
-import { decryptSecret } from "../security/secret-vault";
-import { safeExternalUrl } from "../security/url-safety";
+import { decryptSecret } from "../security/secret-vault.js";
+import { safeExternalUrl } from "../security/url-safety.js";
 
 export interface InternalSiteCredentials {
   id: string;

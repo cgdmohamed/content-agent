@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { passwordPolicyIssues } from "../password-policy";
+import { passwordPolicyIssues } from "../password-policy.js";
 
 describe("password policy", () => {
   it("requires production-strength passwords", () => {

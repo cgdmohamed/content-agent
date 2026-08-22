@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LoginRateLimiter } from "../login-rate-limit";
+import { LoginRateLimiter } from "../login-rate-limit.js";
 
 describe("login rate limit", () => {
   it("limits repeated failures for the same email", () => {

@@ -1,18 +1,18 @@
 import { Module } from "@nestjs/common";
 import { APP_GUARD } from "@nestjs/core";
-import { AuditModule } from "../audit/audit.module";
-import { DatabaseModule } from "../database/database.module";
-import { JobQueueModule } from "../queue/job-queue.module";
-import { SessionGuard } from "../security/access-control";
-import { AuthModule } from "./auth.module";
-import { ContentModule } from "./content.module";
-import { DashboardModule } from "./dashboard.module";
-import { HealthModule } from "./health.module";
-import { JobsModule } from "./jobs.module";
-import { ReportsModule } from "./reports.module";
-import { SettingsModule } from "./settings.module";
-import { SitesModule } from "./sites.module";
-import { UsersModule } from "./users.module";
+import { AuditModule } from "../audit/audit.module.js";
+import { DatabaseModule } from "../database/database.module.js";
+import { JobQueueModule } from "../queue/job-queue.module.js";
+import { SessionGuard } from "../security/access-control.js";
+import { AuthModule } from "./auth.module.js";
+import { ContentModule } from "./content.module.js";
+import { DashboardModule } from "./dashboard.module.js";
+import { HealthModule } from "./health.module.js";
+import { JobsModule } from "./jobs.module.js";
+import { ReportsModule } from "./reports.module.js";
+import { SettingsModule } from "./settings.module.js";
+import { SitesModule } from "./sites.module.js";
+import { UsersModule } from "./users.module.js";
 
 @Module({
   imports: [DatabaseModule, AuditModule, JobQueueModule, AuthModule, SitesModule, ContentModule, DashboardModule, JobsModule, ReportsModule, SettingsModule, UsersModule, HealthModule],

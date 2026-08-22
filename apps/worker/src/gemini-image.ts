@@ -7,7 +7,7 @@ export async function generateGeminiImage(prompt: string): Promise<GeneratedImag
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error("مفتاح Gemini غير مهيأ.");
   const model = process.env.GEMINI_IMAGE_MODEL ?? "gemini-3.1-flash-image";
-  const endpoint = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent`;
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
@@ -15,7 +15,10 @@ export async function generateGeminiImage(prompt: string): Promise<GeneratedImag
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }]
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseModalities: ["TEXT", "IMAGE"]
+      }
     }),
     signal: AbortSignal.timeout(180_000)
   });
@@ -23,7 +26,11 @@ export async function generateGeminiImage(prompt: string): Promise<GeneratedImag
     candidates?: Array<{ content?: { parts?: Array<{ inlineData?: { mimeType?: string; data?: string }; inline_data?: { mime_type?: string; data?: string } }> } }>;
     error?: { message?: string };
   };
-  if (!response.ok) throw new Error(`فشل توليد صورة Gemini برمز ${response.status}.`);
+  if (!response.ok) {
+    const detail = data.error?.message ? ` ${data.error.message}` : "";
+    const hint = response.status === 404 ? " تحقق من GEMINI_IMAGE_MODEL وأن الموديل متاح على Gemini API v1beta لهذا المفتاح." : "";
+    throw new Error(`فشل توليد صورة Gemini برمز ${response.status}.${hint}${detail}`);
+  }
 
   for (const candidate of data.candidates ?? []) {
     for (const part of candidate.content?.parts ?? []) {

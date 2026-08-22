@@ -2,7 +2,7 @@ import { CanActivate, ExecutionContext, ForbiddenException, Injectable, SetMetad
 import { Reflector } from "@nestjs/core";
 import { loadEnv } from "@content-agent/config";
 import type { Request } from "express";
-import { parseSessionCookie, type SessionUser } from "./session-cookie";
+import { parseSessionCookie, type SessionUser } from "./session-cookie.js";
 
 export const PUBLIC_ROUTE = "publicRoute";
 export const ROLES = "roles";

@@ -1,14 +1,14 @@
 import { BadRequestException, Body, Controller, Get, Injectable, Module, NotFoundException, Param, Patch, Post, Req } from "@nestjs/common";
 import { IsIn, IsOptional, IsString, IsUrl, MaxLength } from "class-validator";
-import { AuditService } from "../audit/audit.module";
-import { DatabaseService } from "../database/database.module";
-import { JobQueueService } from "../queue/job-queue.module";
-import { encryptSecret } from "../security/secret-vault";
-import { type AuthenticatedRequest, Roles } from "../security/access-control";
-import { fieldLimits } from "../security/payload-limits";
-import { normalizeGscProperty, normalizeGscServiceAccountJson, testGscConnection, type GscSiteCredentials } from "../integrations/google-search-console";
-import { safeWordPressUrl, testRankMathBridge, testWordPressConnection, type InternalSiteCredentials } from "../integrations/wordpress";
-import { buildJobId } from "./content.module";
+import { AuditService } from "../audit/audit.module.js";
+import { DatabaseService } from "../database/database.module.js";
+import { JobQueueService } from "../queue/job-queue.module.js";
+import { encryptSecret } from "../security/secret-vault.js";
+import { type AuthenticatedRequest, Roles } from "../security/access-control.js";
+import { fieldLimits } from "../security/payload-limits.js";
+import { normalizeGscProperty, normalizeGscServiceAccountJson, testGscConnection, type GscSiteCredentials } from "../integrations/google-search-console.js";
+import { safeWordPressUrl, testRankMathBridge, testWordPressConnection, type InternalSiteCredentials } from "../integrations/wordpress.js";
+import { buildJobId } from "./content.module.js";
 
 export const sitesListLimit = 200;
 

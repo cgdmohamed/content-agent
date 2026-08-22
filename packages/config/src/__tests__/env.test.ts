@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatEnvIssues, loadEnv, envSchema } from "../index";
+import { formatEnvIssues, loadEnv, envSchema } from "../index.js";
 
 const validSource = {
   NODE_ENV: "production",

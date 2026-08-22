@@ -1,10 +1,10 @@
 import { BadRequestException, Body, ConflictException, Controller, Get, Module, Param, Patch, Post, Req } from "@nestjs/common";
 import { IsEmail, IsIn, IsOptional, IsString, MinLength } from "class-validator";
 import bcrypt from "bcryptjs";
-import { AuditService } from "../audit/audit.module";
-import { DatabaseService } from "../database/database.module";
-import { type AuthenticatedRequest, Roles } from "../security/access-control";
-import { passwordPolicyIssues, strongPasswordMessage } from "../security/password-policy";
+import { AuditService } from "../audit/audit.module.js";
+import { DatabaseService } from "../database/database.module.js";
+import { type AuthenticatedRequest, Roles } from "../security/access-control.js";
+import { passwordPolicyIssues, strongPasswordMessage } from "../security/password-policy.js";
 
 export const usersListLimit = 200;
 

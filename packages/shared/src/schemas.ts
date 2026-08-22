@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { contentStates } from "./workflow";
+import { contentStates } from "./workflow.js";
 
 export const contentIdeaSchema = z.object({
   title: z.string().min(3),

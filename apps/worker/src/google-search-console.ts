@@ -1,5 +1,5 @@
 import { createSign } from "node:crypto";
-import { decryptSecret } from "./secrets";
+import { decryptSecret } from "./secrets.js";
 
 export interface GscSite {
   id: string;

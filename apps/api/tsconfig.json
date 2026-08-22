@@ -4,8 +4,14 @@
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "outDir": "dist",
-    "module": "ESNext",
-    "moduleResolution": "Bundler"
+    "rootDir": "src",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "paths": {
+      "@content-agent/config": ["../../packages/config/dist/index.d.ts"],
+      "@content-agent/shared": ["../../packages/shared/dist/index.d.ts"],
+      "@content-agent/types": ["../../packages/types/dist/index.d.ts"]
+    }
   },
   "include": ["src"]
 }

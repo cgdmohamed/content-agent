@@ -1,8 +1,9 @@
 import { BadRequestException, Controller, Get, Module, NotFoundException, Param, Post, Req } from "@nestjs/common";
-import { AuditService } from "../audit/audit.module";
-import { DatabaseService } from "../database/database.module";
-import { JobQueueService } from "../queue/job-queue.module";
-import { type AuthenticatedRequest, Roles } from "../security/access-control";
+import { AuditService } from "../audit/audit.module.js";
+import { DatabaseService } from "../database/database.module.js";
+import { JobQueueService } from "../queue/job-queue.module.js";
+import { type AuthenticatedRequest, Roles } from "../security/access-control.js";
+import { buildJobId } from "./content.module.js";
 
 const jobGroupLimits = {
   active: 50,
@@ -68,7 +69,7 @@ class JobsController {
     if (!job) throw new NotFoundException("المهمة غير موجودة.");
     if (job.status !== "FAILED") throw new BadRequestException("يمكن إعادة محاولة المهام الفاشلة فقط.");
     if (!job.contentItemId) throw new BadRequestException("هذه المهمة لا تحتوي على عنصر محتوى لإعادة المحاولة.");
-    const retryJobId = `${job.operation}:${job.contentItemId}:retry:${Date.now()}`;
+    const retryJobId = buildJobId(job.operation, job.contentItemId, "retry");
     await this.queue.enqueue(job.queueName, job.operation, { contentItemId: job.contentItemId, operation: job.operation }, retryJobId);
     await this.db.query(
       `INSERT INTO job_runs (content_item_id, operation, queue_name, bull_job_id, status)

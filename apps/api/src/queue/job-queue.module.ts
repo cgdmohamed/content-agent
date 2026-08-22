@@ -1,10 +1,10 @@
 import { Global, Module, OnModuleDestroy } from "@nestjs/common";
 import { Queue } from "bullmq";
-import IORedis from "ioredis";
+import { Redis } from "ioredis";
 import { loadEnv } from "@content-agent/config";
 
 export class JobQueueService implements OnModuleDestroy {
-  private readonly connection = new IORedis(loadEnv().REDIS_URL, {
+  private readonly connection = new Redis(loadEnv().REDIS_URL, {
     maxRetriesPerRequest: null
   });
   private readonly queues = new Map<string, Queue>();
@@ -16,8 +16,9 @@ export class JobQueueService implements OnModuleDestroy {
 
   async enqueue(queueName: string, jobName: string, data: Record<string, unknown>, jobId: string, delayMs = 0): Promise<string> {
     const queue = this.queue(queueName);
+    const safeJobId = normalizeBullJobId(jobId);
     const job = await queue.add(jobName, data, {
-      jobId,
+      jobId: safeJobId,
       attempts: 3,
       backoff: { type: "exponential", delay: 30_000 },
       delay: Math.max(0, Math.trunc(delayMs)),
@@ -28,7 +29,7 @@ export class JobQueueService implements OnModuleDestroy {
   }
 
   async cancelQueuedJob(queueName: string, jobId: string): Promise<void> {
-    const job = await this.queue(queueName).getJob(jobId);
+    const job = await this.queue(queueName).getJob(normalizeBullJobId(jobId));
     if (!job) return;
     const state = await job.getState();
     if (!["waiting", "delayed", "prioritized"].includes(state)) {
@@ -52,3 +53,12 @@ export class JobQueueService implements OnModuleDestroy {
   exports: [JobQueueService]
 })
 export class JobQueueModule {}
+
+export function normalizeBullJobId(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/[^\w-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 256) || `job-${Date.now()}`;
+}

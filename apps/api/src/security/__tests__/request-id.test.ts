@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeRequestId, requestIdMiddleware, type RequestWithId } from "../request-id";
+import { normalizeRequestId, requestIdMiddleware, type RequestWithId } from "../request-id.js";
 
 describe("request id middleware", () => {
   it("keeps safe incoming request ids", () => {

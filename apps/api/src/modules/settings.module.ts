@@ -1,10 +1,10 @@
 import { BadRequestException, Body, Controller, Get, Injectable, Module, Patch, Req } from "@nestjs/common";
 import { Type } from "class-transformer";
 import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsBoolean, IsIn, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from "class-validator";
-import { AuditService } from "../audit/audit.module";
-import { DatabaseService } from "../database/database.module";
-import { type AuthenticatedRequest, Roles } from "../security/access-control";
-import { fieldLimits } from "../security/payload-limits";
+import { AuditService } from "../audit/audit.module.js";
+import { DatabaseService } from "../database/database.module.js";
+import { type AuthenticatedRequest, Roles } from "../security/access-control.js";
+import { fieldLimits } from "../security/payload-limits.js";
 
 const textProviders = ["anthropic", "openai", "perplexity"] as const;
 type TextProviderName = (typeof textProviders)[number];

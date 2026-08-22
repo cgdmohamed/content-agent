@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeAuditMetadata } from "../audit.module";
+import { sanitizeAuditMetadata } from "../audit.module.js";
 
 describe("audit metadata sanitization", () => {
   it("redacts sensitive metadata fields recursively", () => {

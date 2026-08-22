@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canCancelJobStatus, jobGroupLimit, statusesForJobGroup } from "../jobs.module";
+import { canCancelJobStatus, jobGroupLimit, statusesForJobGroup } from "../jobs.module.js";
 
 describe("job operation rules", () => {
   it("allows cancelling only jobs that have not started", () => {

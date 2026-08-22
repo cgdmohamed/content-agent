@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { nextAutomatedOperation, shouldAutoContinue } from "../automation";
-import { effectiveHardLimit, isBudgetExceeded, sanitizeProviderChain } from "../ai";
-import { sanitizeArticleHtml } from "../html-sanitizer";
-import { clampNumber, isActiveSiteStatus, providerForOperationResult, shouldAutoSelectFirstIdea } from "../processors";
+import { nextAutomatedOperation, shouldAutoContinue } from "../automation.js";
+import { effectiveHardLimit, isBudgetExceeded, sanitizeProviderChain } from "../ai.js";
+import { sanitizeArticleHtml } from "../html-sanitizer.js";
+import { clampNumber, isActiveSiteStatus, providerForOperationResult, shouldAutoSelectFirstIdea } from "../processors.js";
 
 describe("AI budget limits", () => {
   it("blocks calls at or above the hard monthly limit", () => {

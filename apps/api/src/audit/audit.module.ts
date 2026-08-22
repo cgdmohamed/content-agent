@@ -1,6 +1,6 @@
 import { Controller, Get, Global, Injectable, Module } from "@nestjs/common";
-import { DatabaseService } from "../database/database.module";
-import { Roles } from "../security/access-control";
+import { DatabaseService } from "../database/database.module.js";
+import { Roles } from "../security/access-control.js";
 
 export interface AuditEvent {
   actorUserId?: string | null;

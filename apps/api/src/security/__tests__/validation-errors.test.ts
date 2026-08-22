@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validationExceptionFactory, validationMessages } from "../validation-errors";
+import { validationExceptionFactory, validationMessages } from "../validation-errors.js";
 
 describe("Arabic validation errors", () => {
   it("translates common validation constraints", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { migrationAdvisoryLockKey } from "../database.module";
+import { migrationAdvisoryLockKey } from "../database.module.js";
 
 describe("database migrations", () => {
   it("uses a stable advisory lock key for startup migrations", () => {

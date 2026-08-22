@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dashboardSitesLimit } from "../dashboard.module";
+import { dashboardSitesLimit } from "../dashboard.module.js";
 
 describe("dashboard query limits", () => {
   it("keeps site status cards bounded for fast dashboard refreshes", () => {

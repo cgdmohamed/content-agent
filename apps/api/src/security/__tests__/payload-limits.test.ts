@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fieldLimits, formBodyLimit, jsonBodyLimit } from "../payload-limits";
+import { fieldLimits, formBodyLimit, jsonBodyLimit } from "../payload-limits.js";
 
 describe("payload limits", () => {
   it("uses explicit global body parser limits", () => {

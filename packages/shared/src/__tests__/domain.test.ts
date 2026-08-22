@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { findDuplicateMatches, normalizeArabicText, similarityScore } from "../duplicate-detection";
-import { sanitizeArticleHtml } from "../html-sanitizer";
-import { estimateCostUsd } from "../providers";
-import { scoreContent } from "../content-score";
-import { canTransition, mapLegacyStatus, transitionOrThrow } from "../workflow";
-import { isBlockedIpAddress, safeExternalUrl } from "../url-safety";
+import { findDuplicateMatches, normalizeArabicText, similarityScore } from "../duplicate-detection.js";
+import { sanitizeArticleHtml } from "../html-sanitizer.js";
+import { estimateCostUsd } from "../providers.js";
+import { scoreContent } from "../content-score.js";
+import { canTransition, mapLegacyStatus, transitionOrThrow } from "../workflow.js";
+import { isBlockedIpAddress, safeExternalUrl } from "../url-safety.js";
 
 describe("workflow", () => {
   it("keeps Admin approval as an Admin-only transition", () => {

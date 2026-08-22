@@ -1,9 +1,9 @@
 import { Queue, Worker } from "bullmq";
-import IORedis from "ioredis";
+import { Redis } from "ioredis";
 import { loadEnv } from "@content-agent/config";
-import { closeDb, markJobCompleted, markJobFailed, markJobProvider, markJobStarted, query, setContentFailure } from "./db";
-import { processContentOperation, providerForOperationResult, syncGscForSite } from "./processors";
-import { nextAutomatedOperation, shouldAutoContinue, type AutomationState } from "./automation";
+import { closeDb, markJobCompleted, markJobFailed, markJobProvider, markJobStarted, query, setContentFailure } from "./db.js";
+import { processContentOperation, providerForOperationResult, syncGscForSite } from "./processors.js";
+import { nextAutomatedOperation, shouldAutoContinue, type AutomationState } from "./automation.js";
 
 type ContentState =
   | "NEW"
@@ -89,7 +89,7 @@ function nextPrimaryOperation(state: ContentState): ContentOperation | null {
 
 const env = loadEnv();
 
-const connection = new IORedis(env.REDIS_URL, {
+const connection = new Redis(env.REDIS_URL, {
   maxRetriesPerRequest: null
 });
 
@@ -156,7 +156,7 @@ async function enqueueNextAutomatedStep(contentItemId: string, finishedOperation
   );
   if (existing.rowCount) return;
 
-  const jobId = `${nextOperation}:${contentItemId}:${Date.now()}`;
+  const jobId = buildSafeJobId(nextOperation, contentItemId);
   await queueFor(queueName).add(nextOperation, { contentItemId, operation: nextOperation }, {
     jobId,
     attempts: 3,
@@ -183,6 +183,19 @@ function queueFor(name: string): Queue {
   const created = new Queue(name, { connection });
   queueClients.set(name, created);
   return created;
+}
+
+function buildSafeJobId(operation: string, entityId: string): string {
+  return normalizeBullJobId([operation, entityId, Date.now()].join("-"));
+}
+
+function normalizeBullJobId(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/[^\w-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 256) || `job-${Date.now()}`;
 }
 
 function queueForOperation(operation: string): string {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSiteQualityReport } from "../reports.module";
+import { buildSiteQualityReport } from "../reports.module.js";
 
 describe("site reports", () => {
   it("summarizes editorial quality, keywords, and low score content", () => {
