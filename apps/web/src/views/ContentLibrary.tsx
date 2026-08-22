@@ -3,7 +3,7 @@ import { useEffect, useState, type FormEvent, type ReactElement } from "react";
 import { CheckCircle2, Copy, FilePlus2, FolderOpen, Play, RotateCcw, Search, Trash2, XCircle } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { contentStates, nextPrimaryOperation, type ContentOperation } from "@content-agent/shared";
-import { api } from "../api/client";
+import { api, type ContentDto } from "../api/client";
 import { useCurrentUser } from "../auth";
 import { StatusBadge } from "../ui/Badge";
 import { IconButton } from "../ui/IconButton";
@@ -339,77 +339,42 @@ export function ContentLibrary(): ReactElement {
           </div>
         </div>
       ) : null}
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[1040px] text-right text-sm">
-          <thead className="bg-slate-50 text-xs text-slate-500">
-            <tr>
-              {user.role === "ADMIN" ? <th className="px-5 py-3">تحديد</th> : null}
-              <th className="px-5 py-3">العنوان</th>
-              <th className="px-5 py-3">الموقع</th>
-              <th className="px-5 py-3">الكلمة المستهدفة</th>
-              <th className="px-5 py-3">الحالة</th>
-              <th className="px-5 py-3">الدرجة</th>
-              <th className="px-5 py-3">النمط</th>
-              <th className="px-5 py-3">الجدولة</th>
-              <th className="px-5 py-3">آخر تحديث</th>
-              <th className="px-5 py-3">الإجراءات</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {filteredContent.map((row) => (
-              <tr key={row.id}>
-                {user.role === "ADMIN" ? (
-                  <td className="px-5 py-4">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4"
-                      checked={selectedIds.includes(row.id)}
-                      disabled={!canDeleteContent(row.state)}
-                      onChange={(event) => setSelectedIds((current) => event.target.checked ? [...current, row.id] : current.filter((id) => id !== row.id))}
-                    />
-                  </td>
-                ) : null}
-                <td className="px-5 py-4 font-medium">{row.title}</td>
-                <td className="px-5 py-4">{row.site}</td>
-                <td className="px-5 py-4">{row.targetKeyword}</td>
-                <td className="px-5 py-4"><StatusBadge state={row.state} /></td>
-                <td className="px-5 py-4">{row.score}/100</td>
-                <td className="px-5 py-4">{modeLabels[row.mode]}</td>
-                <td className="px-5 py-4">{row.scheduledDate ? formatDate(row.scheduledDate) : "-"}</td>
-                <td className="px-5 py-4">{formatDate(row.updatedAt)}</td>
-                <td className="px-5 py-4">
-                  <div className="flex gap-2">
-                    <Link className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-3 py-1.5 font-medium hover:border-teal/40 hover:bg-slate-50" to={`/content/${row.id}`} title="فتح">
-                      <FolderOpen className="h-4 w-4" />فتح
-                    </Link>
-                    {renderPrimaryAction(row.id, nextPrimaryOperation(row.state), runOperation.isPending, user.role === "ADMIN", (operation) =>
-                      runOperation.mutate({ id: row.id, operation })
-                    )}
-                    <IconButton
-                      icon={Copy}
-                      className="min-h-8 px-3 py-1.5"
-                      disabled={duplicateContent.isPending}
-                      onClick={() => duplicateContent.mutate(row.id)}
-                    >
-                      نسخ
-                    </IconButton>
-                    {user.role === "ADMIN" && canDeleteContent(row.state) ? (
-                      <IconButton
-                        icon={Trash2}
-                        tone="danger"
-                        className="min-h-8 px-3 py-1.5"
-                        disabled={deleteContent.isPending}
-                        onClick={() => confirmContentDelete(row.title) && deleteContent.mutate(row.id)}
-                      >
-                        حذف
-                      </IconButton>
-                    ) : null}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="bg-slate-50/70 p-4">
+        <div className="space-y-3">
+          {filteredContent.map((row) => (
+            <ContentCard
+              key={row.id}
+              row={row}
+              isAdmin={user.role === "ADMIN"}
+              selected={selectedIds.includes(row.id)}
+              onSelect={(checked) => setSelectedIds((current) => checked ? [...new Set([...current, row.id])] : current.filter((id) => id !== row.id))}
+              primaryAction={renderPrimaryAction(row.id, nextPrimaryOperation(row.state), runOperation.isPending, user.role === "ADMIN", (operation) =>
+                runOperation.mutate({ id: row.id, operation })
+              )}
+              duplicateButton={(
+                <IconButton
+                  icon={Copy}
+                  className="min-h-9 px-3 py-1.5"
+                  disabled={duplicateContent.isPending}
+                  onClick={() => duplicateContent.mutate(row.id)}
+                >
+                  نسخ
+                </IconButton>
+              )}
+              deleteButton={user.role === "ADMIN" && canDeleteContent(row.state) ? (
+                <IconButton
+                  icon={Trash2}
+                  tone="danger"
+                  className="min-h-9 px-3 py-1.5"
+                  disabled={deleteContent.isPending}
+                  onClick={() => confirmContentDelete(row.title) && deleteContent.mutate(row.id)}
+                >
+                  حذف
+                </IconButton>
+              ) : null}
+            />
+          ))}
+        </div>
         {content.data.total === 0 ? <div className="p-5"><EmptyState label="لا توجد نتائج مطابقة للفلاتر الحالية." /></div> : null}
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-4 text-sm">
@@ -437,6 +402,78 @@ export function ContentLibrary(): ReactElement {
       </div>
     </div>
   );
+}
+
+function ContentCard(props: {
+  row: ContentDto;
+  isAdmin: boolean;
+  selected: boolean;
+  onSelect: (checked: boolean) => void;
+  primaryAction: ReactElement;
+  duplicateButton: ReactElement;
+  deleteButton: ReactElement | null;
+}): ReactElement {
+  const { row } = props;
+  return (
+    <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="min-w-0">
+          <div className="flex items-start gap-3">
+            {props.isAdmin ? (
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4 shrink-0"
+                checked={props.selected}
+                onChange={(event) => props.onSelect(event.target.checked)}
+                aria-label={`تحديد ${row.title}`}
+              />
+            ) : null}
+            <div className="min-w-0 flex-1">
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <StatusBadge state={row.state} />
+                <span className={`rounded-md px-2.5 py-1 text-xs font-semibold ${scoreClass(row.score)}`}>{row.score}/100</span>
+                <span className="rounded-md bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">{modeLabels[row.mode]}</span>
+              </div>
+              <h3 className="text-lg font-semibold leading-8 text-slate-950">{row.title}</h3>
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
+                <DetailPill label="الكلمة المستهدفة" value={row.targetKeyword || "-"} />
+                <DetailPill label="الموقع" value={row.site} />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="grid content-between gap-3 border-t border-slate-100 pt-3 xl:border-r xl:border-t-0 xl:pr-4 xl:pt-0">
+          <div className="grid grid-cols-2 gap-2">
+            <DetailPill label="الجدولة" value={row.scheduledDate ? formatDate(row.scheduledDate) : "-"} compact />
+            <DetailPill label="آخر تحديث" value={formatDate(row.updatedAt)} compact />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link className="inline-flex min-h-9 items-center gap-2 rounded-md border border-slate-200 px-3 py-1.5 font-medium hover:border-teal/40 hover:bg-slate-50" to={`/content/${row.id}`} title="فتح">
+              <FolderOpen className="h-4 w-4" />فتح
+            </Link>
+            {props.primaryAction}
+            {props.duplicateButton}
+            {props.deleteButton}
+          </div>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function DetailPill(props: { label: string; value: string; compact?: boolean }): ReactElement {
+  return (
+    <div className={`rounded-md border border-slate-100 bg-slate-50 ${props.compact ? "px-3 py-2" : "px-3 py-2.5"}`}>
+      <p className="text-xs font-medium text-slate-500">{props.label}</p>
+      <p className="mt-1 break-words text-sm font-semibold leading-6 text-slate-900">{props.value}</p>
+    </div>
+  );
+}
+
+function scoreClass(score: number): string {
+  if (score >= 80) return "bg-emerald-50 text-emerald-700";
+  if (score >= 60) return "bg-amber-50 text-amber-700";
+  return "bg-rose-50 text-rose-700";
 }
 
 function canDeleteContent(state: string): boolean {
