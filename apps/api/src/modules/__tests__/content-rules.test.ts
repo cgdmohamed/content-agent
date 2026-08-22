@@ -23,11 +23,12 @@ describe("content operation rules", () => {
     expect(() => assertActiveContentSite("DISABLED")).toThrow("لا يمكن تنفيذ هذا الإجراء على موقع معطل.");
   });
 
-  it("allows deleting only content that is not committed to publishing", () => {
+  it("allows deleting content that is not queued, scheduled, or published", () => {
     expect(canDeleteContentStatus("NEW")).toBe(true);
     expect(canDeleteContentStatus("DRAFTED")).toBe(true);
     expect(canDeleteContentStatus("FAILED")).toBe(true);
-    expect(canDeleteContentStatus("APPROVED")).toBe(false);
+    expect(canDeleteContentStatus("APPROVED")).toBe(true);
+    expect(canDeleteContentStatus("QUEUED")).toBe(false);
     expect(canDeleteContentStatus("SCHEDULED")).toBe(false);
     expect(canDeleteContentStatus("PUBLISHED")).toBe(false);
   });

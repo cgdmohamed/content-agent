@@ -3,7 +3,7 @@ import { fieldLimits, formBodyLimit, jsonBodyLimit } from "../payload-limits.js"
 
 describe("payload limits", () => {
   it("uses explicit global body parser limits", () => {
-    expect(jsonBodyLimit).toBe("2mb");
+    expect(jsonBodyLimit).toBe("12mb");
     expect(formBodyLimit).toBe("128kb");
   });
 
@@ -11,6 +11,7 @@ describe("payload limits", () => {
     expect(fieldLimits.draftHtml).toBeLessThanOrEqual(1_000_000);
     expect(fieldLimits.gscServiceAccountJson).toBeLessThanOrEqual(20_000);
     expect(fieldLimits.bulkTopics).toBeLessThanOrEqual(20_000);
+    expect(fieldLimits.imageUploadBase64).toBeLessThanOrEqual(11_200_000);
     expect(fieldLimits.tags).toBeLessThanOrEqual(20);
   });
 
