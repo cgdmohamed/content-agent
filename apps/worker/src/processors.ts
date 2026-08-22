@@ -9,6 +9,7 @@ import { publishPost, uploadMedia } from "./wordpress.js";
 
 interface ContentRecord {
   id: string;
+  site_id: string;
   topic: string;
   title: string | null;
   target_keyword: string | null;
@@ -40,6 +41,12 @@ interface ContentRecord {
   scheduled_publish_at: Date | null;
   auto_publish: boolean;
   approved_at: Date | null;
+}
+
+interface InternalLinkCandidate {
+  title: string;
+  url: string;
+  keyword: string | null;
 }
 
 export interface OperationResult {
@@ -268,14 +275,15 @@ async function researchGaps(contentItemId: string): Promise<OperationResult> {
   const prompt = [
     `ابحث عن فجوات المنافسين للكلمة: ${keyword}`,
     `السوق: ${item.market}`,
-    "لخص أعلى الفجوات العملية بدون نسخ المنافسين.",
+    trustedResearchInstruction(item.wordpress_url),
+    "لخص أعلى الفجوات العملية بدون نسخ المنافسين أو الاعتماد على صفحات ضعيفة فقط لأنها متصدرة.",
     'أعد JSON فقط بالشكل: {"summary":"...","gaps":["..."],"sources":["https://..."]}'
   ].join("\n");
   const result = await generateText({ contentItemId, operation: "RESEARCH_GAPS", prompt, preferred: ["perplexity", "anthropic", "openai"], maxTokens: 3000 });
   const parsed = extractJson(result.text) as Record<string, unknown> | null;
   if (!parsed || typeof parsed !== "object") throw new Error("رد البحث ليس JSON object صالحًا.");
   const gaps = [parsed.summary, ...(Array.isArray(parsed.gaps) ? parsed.gaps : [])].filter(Boolean).join("\n");
-  const sources = asStringArray(parsed.sources);
+  const sources = trustedSources(asStringArray(parsed.sources), item.wordpress_url);
   await query(
     `UPDATE content_items
      SET competitor_gaps = $2,
@@ -297,6 +305,7 @@ async function writeDraft(contentItemId: string): Promise<OperationResult> {
   const idea = item.selected_idea;
   if (!idea) throw new Error("لا توجد فكرة مختارة للكتابة.");
   const standard = item.writing_standard?.trim() || defaultWritingStandard();
+  const internalLinks = await fetchInternalLinkCandidates(item);
   const prompt = [
     standard,
     languageInstruction(item.language),
@@ -308,6 +317,7 @@ async function writeDraft(contentItemId: string): Promise<OperationResult> {
     `فجوات المنافسين: ${item.competitor_gaps ?? ""}`,
     `الموجز التحريري: ${JSON.stringify(item.editorial_brief)}`,
     `المصادر: ${JSON.stringify(item.sources)}`,
+    `روابط داخلية مرشحة من نفس الموقع: ${JSON.stringify(internalLinks)}`,
     "متطلبات صارمة:",
     `- التزم بلغة الموقع فقط: ${languageName(item.language)}. لا تكتب بالعربية إذا كانت اللغة English.`,
     "- لا يقل المقال عن 1200 كلمة عربية مفيدة، وإن كان الموضوع تنافسيًا اجعله أقرب إلى 1600 كلمة.",
@@ -315,13 +325,14 @@ async function writeDraft(contentItemId: string): Promise<OperationResult> {
     "- أضف CTA طبيعي في نهاية المقال بدون نموذج، مثل دعوة للتواصل أو طلب استشارة أو قراءة مقال مرتبط.",
     "- أضف قسم أسئلة شائعة واضح للإجابة على أسئلة المستخدمين AEO.",
     "- أضف فقرة ملخص تنفيذي أو إجابة مباشرة قابلة للظهور في الإجابات التوليدية GEO.",
-    "- أضف رابطين داخليين على الأقل باستخدام روابط من نفس الموقع فقط. إذا لم تعرف صفحات محددة استخدم رابط الصفحة الرئيسية ورابط بحث داخل الموقع.",
+    "- أضف رابطين داخليين على الأقل من قائمة الروابط الداخلية المرشحة فقط، وبنص anchor طبيعي داخل الفقرات لا في قائمة منفصلة إلا عند الضرورة.",
+    "- إذا كانت القائمة لا تحتوي روابط كافية استخدم رابط الصفحة الرئيسية ورابط بحث داخل الموقع كحل أخير فقط.",
     "- استخدم جدول مقارنة HTML عند وجود بدائل أو مقارنة.",
     'أعد JSON فقط بالشكل: {"title":"...","metaDescription":"...","contentHtml":"...","suggestedTags":["..."],"category":"...","imagePrompt":"...","imageAlt":"..."}'
   ].join("\n\n");
   const result = await generateText({ contentItemId, operation: "WRITE_DRAFT", prompt, preferred: ["anthropic", "openai"], maxTokens: 6000 });
   const article = parseArticle(result.text);
-  const contentHtml = enforceArticleRequirements(article.contentHtml, item);
+  const contentHtml = enforceArticleRequirements(article.contentHtml, item, internalLinks);
   const score = scoreArticle({
     html: contentHtml,
     title: article.title,
@@ -356,13 +367,15 @@ async function writeDraft(contentItemId: string): Promise<OperationResult> {
 async function reviewDraft(contentItemId: string): Promise<OperationResult> {
   const item = await fetchContent(contentItemId);
   if (!item.draft_html) throw new Error("لا توجد مسودة لمراجعتها.");
+  const internalLinks = await fetchInternalLinkCandidates(item);
   const prompt = [
     defaultWritingStandard(),
     languageInstruction(item.language),
     "راجع المقال التالي وحسنه دون فقدان الروابط أو المعنى.",
     `رابط الموقع الأساسي للروابط الداخلية: ${item.wordpress_url}`,
+    `روابط داخلية مرشحة من نفس الموقع: ${JSON.stringify(internalLinks)}`,
     "ركز على نية البحث، الوضوح، إزالة التكرار، تحسين العناوين، الوصف التعريفي، والأسئلة الشائعة.",
-    "ارفع جودة المقال إلى معيار SEO/AEO/GEO: إجابة مباشرة، عمق كاف، قسم أسئلة شائعة، CTA طبيعي، وروابط داخلية من نفس الموقع.",
+    "ارفع جودة المقال إلى معيار SEO/AEO/GEO: إجابة مباشرة، عمق كاف، قسم أسئلة شائعة، CTA طبيعي، وروابط داخلية من قائمة الروابط المرشحة.",
     "احذف أي نصوص تبدو كحقول نموذج أو placeholders مثل الاسم والبريد ورقم الهاتف واملأ النموذج.",
     `لا يقل الناتج النهائي عن 1200 كلمة إذا كان المقال أقصر من ذلك، وبنفس لغة الموقع فقط: ${languageName(item.language)}.`,
     item.draft_html,
@@ -370,7 +383,7 @@ async function reviewDraft(contentItemId: string): Promise<OperationResult> {
   ].join("\n\n");
   const result = await generateText({ contentItemId, operation: "REVIEW_DRAFT", prompt, preferred: ["anthropic", "openai"], maxTokens: 6000 });
   const article = parseArticle(result.text);
-  const contentHtml = enforceArticleRequirements(article.contentHtml, item);
+  const contentHtml = enforceArticleRequirements(article.contentHtml, item, internalLinks);
   const score = scoreArticle({
     html: contentHtml,
     title: article.title,
@@ -438,17 +451,59 @@ function parseArticle(value: string): {
   };
 }
 
-function enforceArticleRequirements(html: string, item: ContentRecord): string {
+async function fetchInternalLinkCandidates(item: ContentRecord): Promise<InternalLinkCandidate[]> {
+  const result = await query<{ title: string | null; topic: string; target_keyword: string | null; wordpress_post_url: string | null }>(
+    `SELECT title, topic, target_keyword, wordpress_post_url
+     FROM content_items
+     WHERE site_id = $1
+       AND id <> $2
+       AND wordpress_post_url IS NOT NULL
+       AND status IN ('PUBLISHED', 'SCHEDULED', 'APPROVED')
+     ORDER BY
+       CASE WHEN target_keyword IS NOT NULL AND $3 ILIKE '%' || target_keyword || '%' THEN 0 ELSE 1 END,
+       content_score DESC,
+       updated_at DESC
+     LIMIT 8`,
+    [item.site_id, item.id, item.topic]
+  );
+  return result.rows
+    .map((row) => ({
+      title: String(row.title ?? row.topic).trim(),
+      url: String(row.wordpress_post_url ?? "").trim(),
+      keyword: row.target_keyword?.trim() || null
+    }))
+    .filter((row) => row.title && isInternalUrl(row.url, item.wordpress_url));
+}
+
+function enforceArticleRequirements(html: string, item: ContentRecord, internalLinks: InternalLinkCandidate[] = []): string {
   let next = removeFormLikeCopy(html);
   if (!hasCta(next)) {
     next += `<h2>الخطوة التالية</h2><p>إذا كنت تقارن الخيارات وتريد قرارًا أدق، راجع احتياجاتك الفعلية وابدأ بتطبيق التوصيات المناسبة، أو تواصل مع فريق ${escapeHtml(item.site_name)} للحصول على توجيه يناسب حالتك.</p>`;
   }
   if (countInternalLinks(next, item.wordpress_url) < 2) {
-    const baseUrl = normalizeBaseUrl(item.wordpress_url);
-    const keyword = encodeURIComponent(String(item.target_keyword ?? item.topic).trim());
-    next += `<h2>روابط داخلية مفيدة</h2><ul><li><a href="${baseUrl}">زيارة الصفحة الرئيسية</a></li><li><a href="${baseUrl}?s=${keyword}">استكشاف مقالات مرتبطة</a></li></ul>`;
+    next += buildInternalLinksFallback(item, internalLinks);
   }
   return sanitizeArticleHtml(next);
+}
+
+function buildInternalLinksFallback(item: ContentRecord, internalLinks: InternalLinkCandidate[]): string {
+  const links = uniqueInternalLinks(internalLinks, item.wordpress_url).slice(0, 2);
+  const baseUrl = normalizeBaseUrl(item.wordpress_url);
+  if (links.length < 2) {
+    const keyword = encodeURIComponent(String(item.target_keyword ?? item.topic).trim());
+    links.push({ title: "زيارة الصفحة الرئيسية", url: baseUrl, keyword: null });
+    links.push({ title: "استكشاف مقالات مرتبطة", url: `${baseUrl}?s=${keyword}`, keyword: null });
+  }
+  return `<h2>مقالات مرتبطة</h2><ul>${links.slice(0, 2).map((link) => `<li><a href="${escapeHtml(link.url)}">${escapeHtml(link.title)}</a></li>`).join("")}</ul>`;
+}
+
+function uniqueInternalLinks(links: InternalLinkCandidate[], siteUrl: string): InternalLinkCandidate[] {
+  const seen = new Set<string>();
+  return links.filter((link) => {
+    if (!isInternalUrl(link.url, siteUrl) || seen.has(link.url)) return false;
+    seen.add(link.url);
+    return true;
+  });
 }
 
 function removeFormLikeCopy(html: string): string {
@@ -467,6 +522,74 @@ function countInternalLinks(html: string, siteUrl: string): number {
   const host = safeHost(siteUrl);
   if (!host) return 0;
   return [...html.matchAll(/<a\s+[^>]*href=["']([^"']+)["']/gi)].filter((match) => safeHost(match[1] ?? "") === host).length;
+}
+
+function isInternalUrl(url: string, siteUrl: string): boolean {
+  const siteHost = safeHost(siteUrl);
+  const linkHost = safeHost(url);
+  return Boolean(siteHost && linkHost && siteHost === linkHost);
+}
+
+function trustedResearchInstruction(siteUrl: string): string {
+  const host = safeHost(siteUrl) ?? "the client site";
+  return [
+    "استخدم المصادر الموثوقة فقط، وليس مجرد الصفحات المتصدرة في نتائج البحث.",
+    "الأولوية: مواقع رسمية حكومية أو سياحية أو تعليمية، منظمات معروفة، مواقع المتاحف/المطارات/التأشيرات الرسمية، مصادر بيانات أصلية، وناشرون تحريريًا موثوقون.",
+    "تجنب: صفحات المنافسين التجارية المباشرة، المنتديات، Reddit/Quora، Pinterest، Medium، Blogspot، مواقع كوبونات أو affiliate، ومقالات SEO سطحية بلا مصدر أصلي.",
+    `لا تستخدم ${host} كمصدر خارجي للمنافسين، لكن يمكن استخدامه فقط للروابط الداخلية لاحقًا.`,
+    "لو لم تجد مصادر موثوقة كافية، أعد مصادر أقل عددًا ولا تملأ القائمة بمواقع ضعيفة."
+  ].join("\n");
+}
+
+function trustedSources(sources: string[], siteUrl: string): string[] {
+  const ownHost = safeHost(siteUrl);
+  const seen = new Set<string>();
+  return sources.filter((source) => {
+    const host = safeHost(source);
+    if (!host || host === ownHost || seen.has(source)) return false;
+    seen.add(source);
+    return isTrustedSourceHost(host);
+  });
+}
+
+function isTrustedSourceHost(host: string): boolean {
+  const normalized = host.replace(/^www\./, "");
+  const blocked = [
+    "reddit.com",
+    "quora.com",
+    "pinterest.com",
+    "medium.com",
+    "blogspot.com",
+    "wordpress.com",
+    "tripadvisor.com",
+    "facebook.com",
+    "x.com",
+    "twitter.com",
+    "instagram.com",
+    "tiktok.com"
+  ];
+  if (blocked.some((domain) => normalized === domain || normalized.endsWith(`.${domain}`))) return false;
+  if (/\.(gov|edu|ac)(\.[a-z]{2})?$/.test(normalized)) return true;
+  if (normalized.endsWith(".gov.uk") || normalized.endsWith(".gov.eg")) return true;
+  const trustedDomains = [
+    "unesco.org",
+    "who.int",
+    "worldbank.org",
+    "oecd.org",
+    "iata.org",
+    "caa.co.uk",
+    "visitbritain.com",
+    "egypt.travel",
+    "metmuseum.org",
+    "britishmuseum.org",
+    "louvre.fr",
+    "lonelyplanet.com",
+    "britannica.com",
+    "nationalgeographic.com",
+    "bbc.com",
+    "reuters.com"
+  ];
+  return trustedDomains.some((domain) => normalized === domain || normalized.endsWith(`.${domain}`));
 }
 
 function safeHost(url: string): string | null {
