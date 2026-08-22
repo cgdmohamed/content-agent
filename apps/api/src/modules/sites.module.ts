@@ -33,7 +33,7 @@ class CreateSiteDto {
   @MaxLength(fieldLimits.market)
   market!: string;
 
-  @IsIn(["ar"])
+  @IsIn(["ar", "en"])
   @MaxLength(fieldLimits.language)
   language!: string;
 
@@ -84,7 +84,7 @@ class UpdateSiteDto {
   market?: string;
 
   @IsOptional()
-  @IsIn(["ar"])
+  @IsIn(["ar", "en"])
   @MaxLength(fieldLimits.language)
   language?: string;
 

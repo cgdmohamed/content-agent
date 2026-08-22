@@ -115,7 +115,9 @@ describe("content operation rules", () => {
       needsAttention: "true"
     });
 
-    expect(filter.limit).toBe(200);
+    expect(filter.page).toBe(1);
+    expect(filter.pageSize).toBe(25);
+    expect(filter.offset).toBe(0);
     expect(filter.sql).toContain("WHERE");
     expect(filter.sql).toContain("c.site_id = $2");
     expect(filter.sql).toContain("c.content_score >= $5");

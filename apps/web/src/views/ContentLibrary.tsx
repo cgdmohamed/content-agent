@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { useState, type FormEvent, type ReactElement } from "react";
+import { useEffect, useState, type FormEvent, type ReactElement } from "react";
 import { CheckCircle2, Copy, FilePlus2, FolderOpen, Play, Search, Trash2, XCircle } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { contentStates, nextPrimaryOperation, type ContentOperation } from "@content-agent/shared";
@@ -27,6 +27,9 @@ export function ContentLibrary(): ReactElement {
   const [updatedFrom, setUpdatedFrom] = useState("");
   const [updatedTo, setUpdatedTo] = useState("");
   const [needsAttentionOnly, setNeedsAttentionOnly] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
   const contentFilters = {
     search: search.trim(),
     siteId: siteFilter,
@@ -35,7 +38,9 @@ export function ContentLibrary(): ReactElement {
     minScore: minimumScore,
     updatedFrom,
     updatedTo,
-    needsAttention: needsAttentionOnly
+    needsAttention: needsAttentionOnly,
+    page,
+    pageSize
   };
   const content = useQuery({ queryKey: ["content", contentFilters], queryFn: () => api.content(contentFilters), refetchInterval: 10000 });
   const sites = useQuery({ queryKey: ["sites"], queryFn: api.sites });
@@ -78,6 +83,16 @@ export function ContentLibrary(): ReactElement {
       await queryClient.invalidateQueries({ queryKey: ["audit"] });
     }
   });
+  const cleanupContent = useMutation({
+    mutationFn: api.cleanupContent,
+    onSuccess: async () => {
+      setSelectedIds([]);
+      await queryClient.invalidateQueries({ queryKey: ["content"] });
+      await queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      await queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      await queryClient.invalidateQueries({ queryKey: ["audit"] });
+    }
+  });
   const duplicateContent = useMutation({
     mutationFn: api.duplicateContent,
     onSuccess: async () => {
@@ -86,6 +101,11 @@ export function ContentLibrary(): ReactElement {
       await queryClient.invalidateQueries({ queryKey: ["audit"] });
     }
   });
+
+  useEffect(() => {
+    setPage(1);
+    setSelectedIds([]);
+  }, [search, siteFilter, stateFilter, modeFilter, minimumScore, updatedFrom, updatedTo, needsAttentionOnly, pageSize]);
 
   if (content.isLoading) return <LoadingState />;
   if (content.isError || !content.data) return <ErrorState />;
@@ -121,7 +141,12 @@ export function ContentLibrary(): ReactElement {
   }
 
   const bulkPreview = buildBulkPreview(bulkTopics, bulkStartDate, bulkPublishTime, bulkIntervalDays);
-  const filteredContent = content.data;
+  const filteredContent = content.data.items;
+  const totalPages = Math.max(1, Math.ceil(content.data.total / content.data.pageSize));
+  const currentStart = content.data.total === 0 ? 0 : (content.data.page - 1) * content.data.pageSize + 1;
+  const currentEnd = Math.min(content.data.total, content.data.page * content.data.pageSize);
+  const deletableIds = filteredContent.filter((row) => canDeleteContent(row.state)).map((row) => row.id);
+  const selectedCount = selectedIds.length;
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white">
@@ -224,6 +249,7 @@ export function ContentLibrary(): ReactElement {
         <ActionError error={runOperation.error} />
         <ActionError error={duplicateContent.error} />
         <ActionError error={deleteContent.error} />
+        <ActionError error={cleanupContent.error} />
       </div>
       <div className="grid gap-3 border-b border-slate-100 px-5 py-4 md:grid-cols-7">
         <label>
@@ -271,10 +297,35 @@ export function ContentLibrary(): ReactElement {
           عرض العناصر التي تحتاج متابعة فقط
         </label>
       </div>
+      {user.role === "ADMIN" ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-3">
+          <label className="flex items-center gap-2 text-sm font-medium text-slate-600">
+            <input
+              type="checkbox"
+              className="h-4 w-4"
+              checked={deletableIds.length > 0 && deletableIds.every((id) => selectedIds.includes(id))}
+              onChange={(event) => setSelectedIds(event.target.checked ? deletableIds : [])}
+            />
+            تحديد القابل للحذف
+          </label>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-slate-500">{selectedCount > 0 ? `تم تحديد ${selectedCount}` : "لا يوجد تحديد"}</span>
+            <IconButton
+              icon={Trash2}
+              tone="danger"
+              disabled={selectedCount === 0 || cleanupContent.isPending}
+              onClick={() => confirmBulkCleanup(selectedCount) && cleanupContent.mutate(selectedIds)}
+            >
+              {cleanupContent.isPending ? "جاري التنظيف..." : "حذف المحدد"}
+            </IconButton>
+          </div>
+        </div>
+      ) : null}
       <div className="overflow-x-auto">
         <table className="w-full min-w-[1040px] text-right text-sm">
           <thead className="bg-slate-50 text-xs text-slate-500">
             <tr>
+              {user.role === "ADMIN" ? <th className="px-5 py-3">تحديد</th> : null}
               <th className="px-5 py-3">العنوان</th>
               <th className="px-5 py-3">الموقع</th>
               <th className="px-5 py-3">الكلمة المستهدفة</th>
@@ -289,6 +340,17 @@ export function ContentLibrary(): ReactElement {
           <tbody className="divide-y divide-slate-100">
             {filteredContent.map((row) => (
               <tr key={row.id}>
+                {user.role === "ADMIN" ? (
+                  <td className="px-5 py-4">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4"
+                      checked={selectedIds.includes(row.id)}
+                      disabled={!canDeleteContent(row.state)}
+                      onChange={(event) => setSelectedIds((current) => event.target.checked ? [...current, row.id] : current.filter((id) => id !== row.id))}
+                    />
+                  </td>
+                ) : null}
                 <td className="px-5 py-4 font-medium">{row.title}</td>
                 <td className="px-5 py-4">{row.site}</td>
                 <td className="px-5 py-4">{row.targetKeyword}</td>
@@ -330,8 +392,30 @@ export function ContentLibrary(): ReactElement {
             ))}
           </tbody>
         </table>
-        {content.data.length === 0 ? <div className="p-5"><EmptyState label="لم يتم إنشاء أي محتوى بعد." /></div> : null}
-        {content.data.length > 0 && filteredContent.length === 0 ? <div className="p-5"><EmptyState label="لا توجد نتائج مطابقة للفلاتر الحالية." /></div> : null}
+        {content.data.total === 0 ? <div className="p-5"><EmptyState label="لا توجد نتائج مطابقة للفلاتر الحالية." /></div> : null}
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-4 text-sm">
+        <div className="text-slate-600">
+          عرض {currentStart} - {currentEnd} من {content.data.total}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-2 text-slate-600">
+            لكل صفحة
+            <select value={pageSize} onChange={(event) => setPageSize(Number(event.target.value))} className="rounded-md border border-slate-200 px-2 py-1">
+              <option value={10}>10</option>
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+            </select>
+          </label>
+          <button className="rounded-md border border-slate-200 px-3 py-1.5 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>
+            السابق
+          </button>
+          <span className="px-2 text-slate-600">صفحة {content.data.page} من {totalPages}</span>
+          <button className="rounded-md border border-slate-200 px-3 py-1.5 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" disabled={page >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>
+            التالي
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -343,6 +427,10 @@ function canDeleteContent(state: string): boolean {
 
 function confirmContentDelete(title: string): boolean {
   return window.confirm(`سيتم حذف "${title}" نهائيًا من لوحة المحتوى إذا لم يكن مرتبطًا بمهمة نشطة. هل تريد المتابعة؟`);
+}
+
+function confirmBulkCleanup(count: number): boolean {
+  return window.confirm(`سيتم إلغاء المهام المنتظرة وحذف ${count} عنصر محتوى غير منشور. لن يتم حذف المنشور أو المجدول. هل تريد المتابعة؟`);
 }
 
 function SiteSelect(props: { sites: Array<{ id: string; name: string }> }): ReactElement {

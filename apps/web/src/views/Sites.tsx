@@ -64,7 +64,7 @@ export function Sites(): ReactElement {
       wordpressUsername: String(data.get("wordpressUsername") ?? ""),
       wordpressApplicationPassword: String(data.get("wordpressApplicationPassword") ?? ""),
       market: String(data.get("market") ?? "SA"),
-      language: "ar",
+      language: String(data.get("language") ?? "ar"),
       writingStandard: String(data.get("writingStandard") ?? ""),
       gscProperty: String(data.get("gscProperty") ?? ""),
       gscServiceAccountJson: String(data.get("gscServiceAccountJson") ?? "")
@@ -83,7 +83,7 @@ export function Sites(): ReactElement {
         wordpressUsername: String(data.get("wordpressUsername") ?? ""),
         wordpressApplicationPassword: optionalString(data.get("wordpressApplicationPassword")),
         market: String(data.get("market") ?? "SA"),
-        language: "ar",
+        language: String(data.get("language") ?? editingSite.language),
         writingStandard: String(data.get("writingStandard") ?? ""),
         gscProperty: String(data.get("gscProperty") ?? ""),
         gscServiceAccountJson: optionalString(data.get("gscServiceAccountJson"))
@@ -104,6 +104,7 @@ export function Sites(): ReactElement {
           <Input name="wordpressUsername" label="اسم مستخدم ووردبريس" required />
           <Input name="wordpressApplicationPassword" label="كلمة مرور التطبيق" type="password" required />
           <Input name="market" label="السوق" defaultValue="SA" required />
+          <LanguageSelect defaultValue="ar" />
           <Input name="gscProperty" label="خاصية بحث جوجل" placeholder="sc-domain:example.com أو https://example.com/" />
           <label className="md:col-span-2">
             <span className="text-sm font-medium text-slate-600">معيار الكتابة</span>
@@ -132,6 +133,7 @@ export function Sites(): ReactElement {
           <Input name="wordpressUsername" label="اسم مستخدم ووردبريس" defaultValue={editingSite.wordpressUsername ?? ""} required />
           <Input name="wordpressApplicationPassword" label="كلمة مرور تطبيق جديدة" type="password" />
           <Input name="market" label="السوق" defaultValue={editingSite.market} required />
+          <LanguageSelect defaultValue={editingSite.language} />
           <Input name="gscProperty" label="خاصية بحث جوجل" defaultValue={editingSite.gscProperty ?? ""} />
           <label className="md:col-span-2">
             <span className="text-sm font-medium text-slate-600">معيار الكتابة</span>
@@ -161,7 +163,7 @@ export function Sites(): ReactElement {
             </div>
             <dl className="mt-5 grid grid-cols-2 gap-3 text-sm">
               <div><dt className="text-slate-500">السوق</dt><dd>{site.market}</dd></div>
-              <div><dt className="text-slate-500">اللغة</dt><dd>{site.language === "ar" ? "العربية" : site.language}</dd></div>
+              <div><dt className="text-slate-500">اللغة</dt><dd>{languageLabel(site.language)}</dd></div>
               <div><dt className="text-slate-500">الحالة</dt><dd className={site.status === "ACTIVE" ? "text-teal" : "text-red-700"}>{site.status === "ACTIVE" ? "نشط" : "معطل"}</dd></div>
               <div><dt className="text-slate-500">ووردبريس</dt><dd>{integrationLabels[site.wordpressStatus]}</dd></div>
               <div><dt className="text-slate-500">رانك ماث</dt><dd>{integrationLabels[site.rankMathStatus]}</dd></div>
@@ -206,6 +208,22 @@ export function Sites(): ReactElement {
 function optionalString(value: FormDataEntryValue | null): string | undefined {
   const text = String(value ?? "").trim();
   return text ? text : undefined;
+}
+
+function languageLabel(value: string): string {
+  return value === "en" ? "الإنجليزية" : "العربية";
+}
+
+function LanguageSelect(props: { defaultValue: string }): ReactElement {
+  return (
+    <label>
+      <span className="text-sm font-medium text-slate-600">لغة المقالات</span>
+      <select name="language" defaultValue={props.defaultValue} required className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm">
+        <option value="ar">العربية</option>
+        <option value="en">English</option>
+      </select>
+    </label>
+  );
 }
 
 function Input(props: { name: string; label: string; type?: string; placeholder?: string; defaultValue?: string; required?: boolean }): ReactElement {

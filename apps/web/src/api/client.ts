@@ -77,6 +77,15 @@ export interface ContentListParams {
   updatedFrom?: string;
   updatedTo?: string;
   needsAttention?: boolean;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface ContentListResponseDto {
+  items: ContentDto[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 export interface ContentDetailDto extends ContentDto {
@@ -291,7 +300,7 @@ export const api = {
   me: () => request<SessionUserDto | null>("/auth/me"),
   login: (body: { email: string; password: string }) => request<{ user: Omit<SessionUserDto, "exp"> }>("/auth/login", { method: "POST", body: JSON.stringify(body) }),
   logout: () => request<{ ok: true }>("/auth/logout", { method: "POST" }),
-  content: (params?: ContentListParams) => request<ContentDto[]>(`/content${queryString(params)}`),
+  content: (params?: ContentListParams) => request<ContentListResponseDto>(`/content${queryString(params)}`),
   contentItem: (id: string) => request<ContentDetailDto>(`/content/${id}`),
   updateContent: (id: string, body: { title?: string; draftHtml?: string; metaDescription?: string; category?: string; imageAlt?: string; tags?: string[] }) =>
     request<ContentDetailDto>(`/content/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
@@ -300,6 +309,7 @@ export const api = {
   createContent: (body: { siteId: string; topic: string; ideasCount: number; contentGoal?: string; audience?: string; searchIntent?: string }) =>
     request<ContentDto>("/content", { method: "POST", body: JSON.stringify(body) }),
   deleteContent: (id: string) => request<{ ok: true; id: string }>(`/content/${id}`, { method: "DELETE" }),
+  cleanupContent: (ids: string[]) => request<{ ok: true; deleted: string[]; cancelledJobs: number; skipped: Array<{ id: string; reason: string }> }>("/content/cleanup", { method: "POST", body: JSON.stringify({ ids }) }),
   duplicateContent: (id: string) => request<ContentDetailDto>(`/content/${id}/duplicate`, { method: "POST" }),
   retryContent: (id: string) => request<{ statusCode: 202; jobId: string; contentItemId: string }>(`/content/${id}/retry`, { method: "POST" }),
   createBulkContent: (body: {

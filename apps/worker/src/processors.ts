@@ -299,6 +299,7 @@ async function writeDraft(contentItemId: string): Promise<OperationResult> {
   const standard = item.writing_standard?.trim() || defaultWritingStandard();
   const prompt = [
     standard,
+    languageInstruction(item.language),
     `اكتب مقالًا كاملًا للموقع: ${item.site_name}`,
     `رابط الموقع الأساسي للروابط الداخلية: ${item.wordpress_url}`,
     `العنوان/الفكرة: ${String(idea.title ?? item.topic)}`,
@@ -308,6 +309,7 @@ async function writeDraft(contentItemId: string): Promise<OperationResult> {
     `الموجز التحريري: ${JSON.stringify(item.editorial_brief)}`,
     `المصادر: ${JSON.stringify(item.sources)}`,
     "متطلبات صارمة:",
+    `- التزم بلغة الموقع فقط: ${languageName(item.language)}. لا تكتب بالعربية إذا كانت اللغة English.`,
     "- لا يقل المقال عن 1200 كلمة عربية مفيدة، وإن كان الموضوع تنافسيًا اجعله أقرب إلى 1600 كلمة.",
     "- لا تكتب أي نصوص نماذج مثل: الاسم، البريد الإلكتروني، رقم الهاتف، املأ النموذج، أرسل الطلب، أو حقول form.",
     "- أضف CTA طبيعي في نهاية المقال بدون نموذج، مثل دعوة للتواصل أو طلب استشارة أو قراءة مقال مرتبط.",
@@ -356,12 +358,13 @@ async function reviewDraft(contentItemId: string): Promise<OperationResult> {
   if (!item.draft_html) throw new Error("لا توجد مسودة لمراجعتها.");
   const prompt = [
     defaultWritingStandard(),
+    languageInstruction(item.language),
     "راجع المقال التالي وحسنه دون فقدان الروابط أو المعنى.",
     `رابط الموقع الأساسي للروابط الداخلية: ${item.wordpress_url}`,
     "ركز على نية البحث، الوضوح، إزالة التكرار، تحسين العناوين، الوصف التعريفي، والأسئلة الشائعة.",
     "ارفع جودة المقال إلى معيار SEO/AEO/GEO: إجابة مباشرة، عمق كاف، قسم أسئلة شائعة، CTA طبيعي، وروابط داخلية من نفس الموقع.",
     "احذف أي نصوص تبدو كحقول نموذج أو placeholders مثل الاسم والبريد ورقم الهاتف واملأ النموذج.",
-    "لا يقل الناتج النهائي عن 1200 كلمة إذا كان المقال أقصر من ذلك.",
+    `لا يقل الناتج النهائي عن 1200 كلمة إذا كان المقال أقصر من ذلك، وبنفس لغة الموقع فقط: ${languageName(item.language)}.`,
     item.draft_html,
     'أعد JSON فقط بالشكل: {"title":"...","metaDescription":"...","contentHtml":"...","suggestedTags":["..."],"category":"...","imagePrompt":"...","imageAlt":"..."}'
   ].join("\n\n");
@@ -500,6 +503,16 @@ function defaultWritingStandard(): string {
     "لا تضف حقول نموذج أو placeholders أو نصوص form داخل المقال.",
     "لا تخترع مصادر خارجية، ولا تذكر أنك ذكاء اصطناعي."
   ].join("\n");
+}
+
+function languageInstruction(language: string): string {
+  return language === "en"
+    ? "Language requirement: write the full article in English only. Use natural UK English. Do not output Arabic headings, Arabic paragraphs, or mixed-language content."
+    : "متطلب اللغة: اكتب المقال كاملًا بالعربية الفصحى فقط. لا تخلط الإنجليزية داخل العناوين أو الفقرات إلا عند الحاجة للكلمات المفتاحية.";
+}
+
+function languageName(language: string): string {
+  return language === "en" ? "English" : "Arabic";
 }
 
 function daysAgoIso(days: number): string {

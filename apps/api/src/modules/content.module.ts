@@ -7,7 +7,8 @@ import { JobQueueService, normalizeBullJobId } from "../queue/job-queue.module.j
 import { type AuthenticatedRequest, Roles } from "../security/access-control.js";
 import { fieldLimits } from "../security/payload-limits.js";
 
-const contentListLimit = 200;
+const defaultContentPageSize = 25;
+const maxContentPageSize = 100;
 
 class CreateManualContentDto {
   @IsString()
@@ -145,6 +146,13 @@ class ScoreContentDto {
   metaDescription?: string;
 }
 
+class BulkContentIdsDto {
+  @IsArray()
+  @ArrayMaxSize(100)
+  @IsString({ each: true })
+  ids!: string[];
+}
+
 export interface ContentListQuery {
   search?: string;
   siteId?: string;
@@ -154,12 +162,16 @@ export interface ContentListQuery {
   updatedFrom?: string;
   updatedTo?: string;
   needsAttention?: string;
+  page?: string;
+  pageSize?: string;
 }
 
 export interface ContentListFilter {
   sql: string;
   values: unknown[];
-  limit: number;
+  page: number;
+  pageSize: number;
+  offset: number;
 }
 
 interface ContentRow {
@@ -280,19 +292,34 @@ class ContentService {
     private readonly audit: AuditService
   ) {}
 
-  async list(query: ContentListQuery = {}): Promise<Array<Record<string, unknown>>> {
+  async list(query: ContentListQuery = {}): Promise<{ items: Array<Record<string, unknown>>; total: number; page: number; pageSize: number }> {
     const filter = buildContentListFilter(query);
-    const result = await this.db.query<ContentRow>(
+    const [result, total] = await Promise.all([
+      this.db.query<ContentRow>(
       `SELECT c.id, c.site_id, s.name AS site_name, c.topic, c.title, c.target_keyword, c.status, c.mode,
               c.scheduled_publish_at, c.content_score, c.updated_at, c.created_at
        FROM content_items c
        JOIN sites s ON s.id = c.site_id
        ${filter.sql}
        ORDER BY c.updated_at DESC, c.created_at DESC
-       LIMIT ${filter.limit}`,
-      filter.values
-    );
-    return result.rows.map(toPublicContentRow);
+       LIMIT ${filter.pageSize}
+       OFFSET ${filter.offset}`,
+        filter.values
+      ),
+      this.db.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count
+         FROM content_items c
+         JOIN sites s ON s.id = c.site_id
+         ${filter.sql}`,
+        filter.values
+      )
+    ]);
+    return {
+      items: result.rows.map(toPublicContentRow),
+      total: Number(total.rows[0]?.count ?? 0),
+      page: filter.page,
+      pageSize: filter.pageSize
+    };
   }
 
   async create(body: CreateManualContentDto, actorUserId?: string): Promise<Record<string, unknown>> {
@@ -999,6 +1026,87 @@ class ContentService {
     });
   }
 
+  async cleanup(ids: string[], actorUserId?: string): Promise<{ ok: true; deleted: string[]; cancelledJobs: number; skipped: Array<{ id: string; reason: string }> }> {
+    const uniqueIds = [...new Set(ids.map((id) => id.trim()).filter(Boolean))];
+    if (uniqueIds.length === 0) throw new BadRequestException("اختر عنصر محتوى واحدًا على الأقل.");
+    const rows = await this.db.query<{
+      id: string;
+      siteId: string;
+      status: ContentState;
+      title: string | null;
+      topic: string;
+      wordpressPostId: string | null;
+    }>(
+      `SELECT id, site_id AS "siteId", status, title, topic, wordpress_post_id AS "wordpressPostId"
+       FROM content_items
+       WHERE id = ANY($1::uuid[])`,
+      [uniqueIds]
+    );
+    const byId = new Map(rows.rows.map((row) => [row.id, row]));
+    const deleted: string[] = [];
+    const skipped: Array<{ id: string; reason: string }> = [];
+    let cancelledJobs = 0;
+
+    for (const id of uniqueIds) {
+      const item = byId.get(id);
+      if (!item) {
+        skipped.push({ id, reason: "غير موجود" });
+        continue;
+      }
+      if (!canDeleteContentStatus(item.status) || item.wordpressPostId) {
+        skipped.push({ id, reason: "منشور أو معتمد أو مجدول" });
+        continue;
+      }
+      const jobs = await this.db.query<{ id: string; queueName: string; bullJobId: string }>(
+        `SELECT id, queue_name AS "queueName", bull_job_id AS "bullJobId"
+         FROM job_runs
+         WHERE content_item_id = $1
+           AND status IN ('WAITING', 'DELAYED')
+           AND bull_job_id IS NOT NULL`,
+        [id]
+      );
+      for (const job of jobs.rows) {
+        try {
+          await this.queue.cancelQueuedJob(job.queueName, job.bullJobId);
+        } catch {
+          // The job may already be gone from Redis; keep DB cleanup deterministic.
+        }
+      }
+      if (jobs.rowCount) {
+        cancelledJobs += jobs.rowCount;
+        await this.db.query(
+          `UPDATE job_runs
+           SET status = 'CANCELLED',
+               error = NULL,
+               finished_at = now()
+           WHERE content_item_id = $1
+             AND status IN ('WAITING', 'DELAYED')`,
+          [id]
+        );
+      }
+      const active = await this.db.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count
+         FROM job_runs
+         WHERE content_item_id = $1
+           AND status = 'ACTIVE'`,
+        [id]
+      );
+      if (Number(active.rows[0]?.count ?? 0) > 0) {
+        skipped.push({ id, reason: "لديه مهمة قيد التنفيذ الآن" });
+        continue;
+      }
+      await this.db.query(
+        `INSERT INTO audit_logs (actor_user_id, content_item_id, site_id, event_type, message, metadata)
+         VALUES ($1, $2, $3, 'CONTENT_DELETED', 'تم حذف عنصر محتوى ضمن تنظيف جماعي', $4::jsonb)`,
+        [actorUserId ?? null, id, item.siteId, JSON.stringify({ title: item.title, topic: item.topic, status: item.status })]
+      );
+      await this.db.query("DELETE FROM content_items WHERE id = $1", [id]);
+      deleted.push(id);
+    }
+
+    return { ok: true, deleted, cancelledJobs, skipped };
+  }
+
   private async resolveIdeasCount(input: number | undefined): Promise<number> {
     if (typeof input === "number") return clampNumber(input, 1, 20);
     const result = await this.db.query<{ value: { defaultIdeasCount?: number } }>(
@@ -1206,11 +1314,15 @@ export function buildContentListFilter(query: ContentListQuery): ContentListFilt
   if (query.needsAttention === "true") {
     clauses.push("(c.status IN ('FAILED', 'DUPLICATE') OR (c.content_score > 0 AND c.content_score < 60))");
   }
+  const page = parseBoundedInteger(query.page, 1, 10_000) ?? 1;
+  const pageSize = parseBoundedInteger(query.pageSize, 1, maxContentPageSize) ?? defaultContentPageSize;
 
   return {
     sql: clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "",
     values,
-    limit: contentListLimit
+    page,
+    pageSize,
+    offset: (page - 1) * pageSize
   };
 }
 
@@ -1409,6 +1521,12 @@ class ContentController {
   @Post("bulk")
   createBulk(@Body() body: CreateBulkContentDto, @Req() request: AuthenticatedRequest): Promise<Record<string, unknown>> {
     return this.content.createBulk(body, request.user?.id);
+  }
+
+  @Post("cleanup")
+  @Roles("ADMIN")
+  cleanup(@Body() body: BulkContentIdsDto, @Req() request: AuthenticatedRequest): Promise<{ ok: true; deleted: string[]; cancelledJobs: number; skipped: Array<{ id: string; reason: string }> }> {
+    return this.content.cleanup(body.ids, request.user?.id);
   }
 
   @Get(":id")
