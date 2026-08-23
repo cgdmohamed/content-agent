@@ -3,7 +3,11 @@ import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import TiptapLink from "@tiptap/extension-link";
 import TiptapImage from "@tiptap/extension-image";
-import { Bold, Bot, Check, ExternalLink, Heading2, Heading3, Image, Italic, Link2, LinkIcon, List, ListOrdered, LoaderCircle, Network, Pilcrow, Quote, Redo2, RotateCcw, Save, SearchCheck, Send, Sparkles, Undo2, UploadCloud, X } from "lucide-react";
+import TiptapTable from "@tiptap/extension-table";
+import TiptapTableCell from "@tiptap/extension-table-cell";
+import TiptapTableHeader from "@tiptap/extension-table-header";
+import TiptapTableRow from "@tiptap/extension-table-row";
+import { Bold, Bot, Check, ExternalLink, Heading2, Heading3, Image, Italic, Link2, LinkIcon, List, ListOrdered, LoaderCircle, Network, Pilcrow, Quote, Redo2, RotateCcw, Rows3, Save, SearchCheck, Send, Sparkles, Table2, Undo2, UploadCloud, X } from "lucide-react";
 import { forwardRef, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -140,6 +144,10 @@ export function ArticleWorkspace(): ReactElement {
         HTMLAttributes: { rel: "noopener noreferrer", target: "_blank" }
       }),
       TiptapImage.configure({ inline: false, allowBase64: false }),
+      TiptapTable.configure({ resizable: true, HTMLAttributes: { class: "article-table" } }),
+      TiptapTableRow,
+      TiptapTableHeader,
+      TiptapTableCell,
       Placeholder.configure({ placeholder: "ابدأ تحرير المقال هنا..." })
     ],
     content: "",
@@ -479,6 +487,10 @@ function RichEditorToolbar({ editor }: { editor: Editor | null }): ReactElement 
       <ToolbarButton label="قائمة نقطية" icon={List} active={editor?.isActive("bulletList")} disabled={disabled} onClick={() => editor?.chain().focus().toggleBulletList().run()} />
       <ToolbarButton label="قائمة مرقمة" icon={ListOrdered} active={editor?.isActive("orderedList")} disabled={disabled} onClick={() => editor?.chain().focus().toggleOrderedList().run()} />
       <span className="mx-1 h-6 w-px bg-slate-200" />
+      <ToolbarButton label="إدراج جدول" icon={Table2} active={editor?.isActive("table")} disabled={disabled} onClick={() => insertEditorTable(editor)} />
+      <ToolbarButton label="إضافة صف" icon={Rows3} disabled={disabled || !editor?.isActive("table")} onClick={() => editor?.chain().focus().addRowAfter().run()} />
+      <ToolbarButton label="إضافة عمود" icon={Network} disabled={disabled || !editor?.isActive("table")} onClick={() => editor?.chain().focus().addColumnAfter().run()} />
+      <span className="mx-1 h-6 w-px bg-slate-200" />
       <ToolbarButton label="تراجع" icon={Undo2} disabled={disabled || !editor?.can().undo()} onClick={() => editor?.chain().focus().undo().run()} />
       <ToolbarButton label="إعادة" icon={Redo2} disabled={disabled || !editor?.can().redo()} onClick={() => editor?.chain().focus().redo().run()} />
     </div>
@@ -564,6 +576,11 @@ function insertEditorImage(editor: Editor | null): void {
   if (!src?.trim()) return;
   const alt = window.prompt("النص البديل للصورة", "") ?? "";
   editor.chain().focus().setImage({ src: src.trim(), alt: alt.trim() }).run();
+}
+
+function insertEditorTable(editor: Editor | null): void {
+  if (!editor) return;
+  editor.chain().focus().insertTable({ rows: 4, cols: 4, withHeaderRow: true }).run();
 }
 
 function handleManualImageFile(file: File, upload: (file: File) => void): void {

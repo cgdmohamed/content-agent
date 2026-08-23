@@ -73,6 +73,19 @@ describe("article HTML sanitizer", () => {
     expect(html).not.toContain("<script");
     expect(html).not.toContain("<iframe");
   });
+
+  it("keeps semantic tables readable", () => {
+    const html = sanitizeArticleHtml(
+      '<table><thead><tr><th colspan="2">نوع الفراغ</th><th onclick="bad()">الإضاءة</th></tr></thead><tbody><tr><td rowspan="1">غرفة المعيشة</td><td>فاتح</td><td>LED خطية</td></tr></tbody></table>'
+    );
+
+    expect(html).toContain("<table>");
+    expect(html).toContain("<thead>");
+    expect(html).toContain('colspan="2"');
+    expect(html).toContain('rowspan="1"');
+    expect(html).toContain("<td>LED خطية</td>");
+    expect(html).not.toContain("onclick");
+  });
 });
 
 describe("external URL safety", () => {

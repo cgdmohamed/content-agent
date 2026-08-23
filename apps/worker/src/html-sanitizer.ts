@@ -30,7 +30,9 @@ const allowedTags = [
 
 const allowedAttributes: sanitizeHtml.IOptions["allowedAttributes"] = {
   a: ["href", "title", "target", "rel"],
-  img: ["src", "alt", "title", "width", "height", "loading"]
+  img: ["src", "alt", "title", "width", "height", "loading"],
+  th: ["colspan", "rowspan", "colwidth"],
+  td: ["colspan", "rowspan", "colwidth"]
 };
 
 export function sanitizeArticleHtml(html: string): string {

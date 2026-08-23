@@ -54,3 +54,56 @@ input {
   padding: 0.75rem 1rem;
   color: #475569;
 }
+
+.prose table {
+  width: 100%;
+  min-width: 640px;
+  margin-top: 1rem;
+  border-collapse: collapse;
+  table-layout: fixed;
+  direction: rtl;
+  font-size: 0.92rem;
+  line-height: 1.7;
+}
+
+.prose table th,
+.prose table td {
+  border: 1px solid #cbd5e1;
+  padding: 0.75rem;
+  vertical-align: top;
+  text-align: right;
+  word-break: break-word;
+}
+
+.prose table th {
+  background: #f1f5f9;
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.prose table tr:nth-child(even) td {
+  background: #f8fafc;
+}
+
+.prose .tableWrapper {
+  margin-top: 1rem;
+  overflow-x: auto;
+}
+
+.ProseMirror .selectedCell::after {
+  background: rgba(15, 118, 110, 0.14);
+}
+
+.ProseMirror .column-resize-handle {
+  background-color: #0f766e;
+  bottom: -2px;
+  pointer-events: none;
+  position: absolute;
+  right: -2px;
+  top: 0;
+  width: 4px;
+}
+
+.ProseMirror.resize-cursor {
+  cursor: ew-resize;
+}
