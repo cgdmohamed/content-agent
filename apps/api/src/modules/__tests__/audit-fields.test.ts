@@ -17,6 +17,7 @@ describe("audit metadata field filtering", () => {
   it("blocks integration actions for disabled sites", () => {
     expect(isSiteActive("ACTIVE")).toBe(true);
     expect(isSiteActive("DISABLED")).toBe(false);
+    expect(isSiteActive("DELETED")).toBe(false);
     expect(() => assertSiteActive("DISABLED")).toThrow("لا يمكن تنفيذ هذا الإجراء على موقع معطل.");
   });
 

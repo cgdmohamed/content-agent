@@ -1,4 +1,4 @@
-import { BarChart3, Edit3, FilePlus2, Globe2, Power, RefreshCw, SearchCheck, Settings2, SquarePen, Wifi } from "lucide-react";
+import { AlertTriangle, BarChart3, Edit3, FilePlus2, Globe2, Power, RefreshCw, SearchCheck, Settings2, SquarePen, Trash2, Wifi } from "lucide-react";
 import { useState, type FormEvent, type ReactElement } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -16,6 +16,7 @@ export function Sites(): ReactElement {
   const sites = useQuery({ queryKey: ["sites"], queryFn: api.sites });
   const [formOpen, setFormOpen] = useState(false);
   const [editingSite, setEditingSite] = useState<SiteDto | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<SiteDto | null>(null);
   const createSite = useMutation({
     mutationFn: api.createSite,
     onSuccess: async () => {
@@ -48,6 +49,15 @@ export function Sites(): ReactElement {
     onSuccess: async () => {
       setEditingSite(null);
       await queryClient.invalidateQueries({ queryKey: ["sites"] });
+      await queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    }
+  });
+  const deleteSite = useMutation({
+    mutationFn: api.deleteSite,
+    onSuccess: async () => {
+      setDeleteTarget(null);
+      await queryClient.invalidateQueries({ queryKey: ["sites"] });
+      await queryClient.invalidateQueries({ queryKey: ["content"] });
       await queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     }
   });
@@ -185,6 +195,7 @@ export function Sites(): ReactElement {
                   >
                     {site.status === "ACTIVE" ? "تعطيل" : "تفعيل"}
                   </IconButton>
+                  <IconButton icon={Trash2} tone="danger" disabled={deleteSite.isPending} onClick={() => setDeleteTarget(site)}>حذف</IconButton>
                 </>
               ) : null}
               <Link className="inline-flex min-h-9 items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm font-semibold hover:border-teal/40 hover:bg-slate-50" to="/content"><Edit3 className="h-4 w-4" />إنشاء محتوى</Link>
@@ -196,11 +207,49 @@ export function Sites(): ReactElement {
               <ActionError error={testGsc.variables === site.id ? testGsc.error : null} />
               <ActionError error={syncGsc.variables === site.id ? syncGsc.error : null} />
               <ActionError error={updateSite.variables?.id === site.id ? updateSite.error : null} />
+              <ActionError error={deleteSite.variables === site.id ? deleteSite.error : null} />
             </div> : null}
           </div>
         ))}
       </div>
       {sites.data.length === 0 ? <EmptyState label="لا توجد مواقع مضافة بعد." /> : null}
+      {deleteTarget ? (
+        <DeleteSiteModal
+          site={deleteTarget}
+          isPending={deleteSite.isPending}
+          error={deleteSite.error}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => deleteSite.mutate(deleteTarget.id)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function DeleteSiteModal(props: { site: SiteDto; isPending: boolean; error: unknown; onCancel: () => void; onConfirm: () => void }): ReactElement {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4">
+      <section className="w-full max-w-lg rounded-lg border border-slate-200 bg-white p-5 shadow-xl">
+        <div className="flex items-start gap-3">
+          <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-red-100 text-red-700"><AlertTriangle className="h-5 w-5" /></span>
+          <div>
+            <h3 className="text-lg font-semibold">حذف الموقع</h3>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              سيتم إخفاء موقع <strong>{props.site.name}</strong> وكل المقالات التابعة له من النظام. لن يتم حذف منشورات ووردبريس نفسها.
+            </p>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              لو للموقع مقالات مجدولة، سيمنع النظام الحذف حتى يتم سحب الجدولة أو حذف تلك المقالات أولًا.
+            </p>
+          </div>
+        </div>
+        <div className="mt-4"><ActionError error={props.error} /></div>
+        <div className="mt-5 flex flex-wrap justify-end gap-2">
+          <button className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold hover:bg-slate-50" type="button" onClick={props.onCancel} disabled={props.isPending}>إلغاء</button>
+          <button className="inline-flex items-center gap-2 rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60" type="button" onClick={props.onConfirm} disabled={props.isPending}>
+            <Trash2 className="h-4 w-4" />{props.isPending ? "جاري الحذف..." : "تأكيد الحذف"}
+          </button>
+        </div>
+      </section>
     </div>
   );
 }

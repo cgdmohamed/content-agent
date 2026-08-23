@@ -27,10 +27,17 @@ class DashboardController {
          COUNT(*) FILTER (WHERE status = 'SCHEDULED')::text AS scheduled,
          COALESCE((SELECT SUM(estimated_cost_usd)::text FROM api_usage_logs WHERE created_at >= date_trunc('month', now())), '0') AS monthly_ai_spend,
          ROUND(AVG(NULLIF(content_score, 0)))::text AS average_score
-       FROM content_items`
+       FROM content_items c
+       JOIN sites s ON s.id = c.site_id
+       WHERE s.status <> 'DELETED'`
     );
     const distribution = await this.db.query<{ name: ContentState; value: string }>(
-      "SELECT status AS name, COUNT(*)::text AS value FROM content_items GROUP BY status ORDER BY status"
+      `SELECT c.status AS name, COUNT(*)::text AS value
+       FROM content_items c
+       JOIN sites s ON s.id = c.site_id
+       WHERE s.status <> 'DELETED'
+       GROUP BY c.status
+       ORDER BY c.status`
     );
     const sites = await this.db.query(
       `SELECT s.id, s.name, s.wordpress_url AS "wordpressUrl", s.market, s.language,
@@ -39,6 +46,7 @@ class DashboardController {
               COUNT(c.id) FILTER (WHERE c.status = 'PUBLISHED')::int AS "publishedCount"
        FROM sites s
        LEFT JOIN content_items c ON c.site_id = s.id
+       WHERE s.status <> 'DELETED'
        GROUP BY s.id
        ORDER BY s.created_at DESC
        LIMIT ${dashboardSitesLimit}`
@@ -50,7 +58,8 @@ class DashboardController {
               c.updated_at AS "updatedAt", c.created_at AS "createdAt"
        FROM content_items c
        JOIN sites s ON s.id = c.site_id
-       WHERE c.status = 'FAILED' OR c.content_score < 60
+       WHERE s.status <> 'DELETED'
+         AND (c.status = 'FAILED' OR c.content_score < 60)
        ORDER BY c.updated_at DESC
        LIMIT 10`
     );
@@ -58,6 +67,7 @@ class DashboardController {
       `SELECT g.site_id AS "siteId", s.name AS site, g.query, g.clicks, g.impressions, g.ctr, g.position, g.synced_at AS "syncedAt"
        FROM gsc_query_snapshots g
        JOIN sites s ON s.id = g.site_id
+       WHERE s.status <> 'DELETED'
        ORDER BY g.impressions DESC, g.clicks ASC, g.position ASC
        LIMIT 10`
     );

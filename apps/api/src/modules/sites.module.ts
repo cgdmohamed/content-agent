@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Injectable, Module, NotFoundException, Param, Patch, Post, Req } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Delete, Get, Injectable, Module, NotFoundException, Param, Patch, Post, Req } from "@nestjs/common";
 import { IsIn, IsOptional, IsString, IsUrl, MaxLength } from "class-validator";
 import { AuditService } from "../audit/audit.module.js";
 import { DatabaseService } from "../database/database.module.js";
@@ -143,6 +143,7 @@ class SitesService {
               COUNT(c.id) FILTER (WHERE c.status = 'PUBLISHED')::text AS published_count
        FROM sites s
        LEFT JOIN content_items c ON c.site_id = s.id
+       WHERE s.status <> 'DELETED'
        GROUP BY s.id
        ORDER BY s.created_at DESC
        LIMIT ${sitesListLimit}`
@@ -188,7 +189,7 @@ class SitesService {
   }
 
   async update(id: string, body: UpdateSiteDto, actorUserId?: string): Promise<Record<string, unknown>> {
-    const existing = await this.db.query<{ id: string }>("SELECT id FROM sites WHERE id = $1", [id]);
+    const existing = await this.db.query<{ id: string }>("SELECT id FROM sites WHERE id = $1 AND status <> 'DELETED'", [id]);
     if (!existing.rowCount) throw new NotFoundException("الموقع غير موجود");
     const wordpressUrl = body.wordpressUrl ? safeWordPressInputUrl(body.wordpressUrl) : null;
     const gscProperty = body.gscProperty ? safeGscPropertyInput(body.gscProperty) : null;
@@ -236,7 +237,7 @@ class SitesService {
 
   async testWordPress(id: string, actorUserId?: string): Promise<{ id: string; status: string; message: string }> {
     const result = await this.db.query<InternalSiteCredentials & { site_status: string }>(
-      "SELECT id, wordpress_url, wordpress_username, wordpress_application_password_encrypted, status AS site_status FROM sites WHERE id = $1",
+      "SELECT id, wordpress_url, wordpress_username, wordpress_application_password_encrypted, status AS site_status FROM sites WHERE id = $1 AND status <> 'DELETED'",
       [id]
     );
     if (!result.rowCount) throw new NotFoundException("الموقع غير موجود");
@@ -249,7 +250,7 @@ class SitesService {
 
   async testRankMath(id: string, actorUserId?: string): Promise<{ id: string; status: string; message: string }> {
     const result = await this.db.query<InternalSiteCredentials & { site_status: string }>(
-      "SELECT id, wordpress_url, wordpress_username, wordpress_application_password_encrypted, status AS site_status FROM sites WHERE id = $1",
+      "SELECT id, wordpress_url, wordpress_username, wordpress_application_password_encrypted, status AS site_status FROM sites WHERE id = $1 AND status <> 'DELETED'",
       [id]
     );
     if (!result.rowCount) throw new NotFoundException("الموقع غير موجود");
@@ -262,7 +263,7 @@ class SitesService {
 
   async testGsc(id: string, actorUserId?: string): Promise<{ id: string; status: string; message: string }> {
     const result = await this.db.query<GscSiteCredentials & { site_status: string }>(
-      "SELECT id, gsc_property, gsc_service_account_encrypted, status AS site_status FROM sites WHERE id = $1",
+      "SELECT id, gsc_property, gsc_service_account_encrypted, status AS site_status FROM sites WHERE id = $1 AND status <> 'DELETED'",
       [id]
     );
     if (!result.rowCount) throw new NotFoundException("الموقع غير موجود");
@@ -275,7 +276,7 @@ class SitesService {
 
   async syncGsc(id: string, actorUserId?: string): Promise<{ statusCode: 202; jobId: string; siteId: string }> {
     const site = await this.db.query<{ id: string; gsc_property: string | null; gsc_service_account_encrypted: string | null; site_status: string }>(
-      "SELECT id, gsc_property, gsc_service_account_encrypted, status AS site_status FROM sites WHERE id = $1",
+      "SELECT id, gsc_property, gsc_service_account_encrypted, status AS site_status FROM sites WHERE id = $1 AND status <> 'DELETED'",
       [id]
     );
     if (!site.rowCount) throw new NotFoundException("الموقع غير موجود");
@@ -306,6 +307,34 @@ class SitesService {
     );
     await this.audit.record({ actorUserId, siteId: id, eventType: "SITE_GSC_SYNC_ENQUEUED", message: "تمت إضافة مزامنة بحث جوجل للطابور", metadata: { jobId } });
     return { statusCode: 202, jobId, siteId: id };
+  }
+
+  async remove(id: string, actorUserId?: string): Promise<{ ok: true; id: string; hiddenContent: number }> {
+    return this.db.transaction(async (query) => {
+      const site = await query<{ id: string; name: string; status: string }>(
+        "SELECT id, name, status FROM sites WHERE id = $1 AND status <> 'DELETED' FOR UPDATE",
+        [id]
+      );
+      if (!site.rowCount) throw new NotFoundException("الموقع غير موجود");
+      const scheduled = await query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count
+         FROM content_items
+         WHERE site_id = $1
+           AND (status = 'SCHEDULED' OR scheduled_publish_at IS NOT NULL)`,
+        [id]
+      );
+      if (Number(scheduled.rows[0]?.count ?? 0) > 0) {
+        throw new BadRequestException("لا يمكن حذف موقع لديه مقالات مجدولة. اسحب الجدولة أو احذف المقالات المجدولة أولًا.");
+      }
+      const content = await query<{ count: string }>("SELECT COUNT(*)::text AS count FROM content_items WHERE site_id = $1", [id]);
+      await query("UPDATE sites SET status = 'DELETED', updated_at = now() WHERE id = $1", [id]);
+      await query(
+        `INSERT INTO audit_logs (actor_user_id, site_id, event_type, message, metadata)
+         VALUES ($1, $2, 'SITE_DELETED', 'تم حذف الموقع وإخفاء محتواه من النظام', $3::jsonb)`,
+        [actorUserId ?? null, id, JSON.stringify({ name: site.rows[0]!.name, hiddenContent: Number(content.rows[0]?.count ?? 0) })]
+      );
+      return { ok: true, id, hiddenContent: Number(content.rows[0]?.count ?? 0) };
+    });
   }
 }
 
@@ -349,6 +378,12 @@ class SitesController {
   @Roles("ADMIN")
   update(@Param("id") id: string, @Body() body: UpdateSiteDto, @Req() request: AuthenticatedRequest): Promise<Record<string, unknown>> {
     return this.sites.update(id, body, request.user?.id);
+  }
+
+  @Delete(":id")
+  @Roles("ADMIN")
+  remove(@Param("id") id: string, @Req() request: AuthenticatedRequest): Promise<{ ok: true; id: string; hiddenContent: number }> {
+    return this.sites.remove(id, request.user?.id);
   }
 
   @Post(":id/test-wordpress")

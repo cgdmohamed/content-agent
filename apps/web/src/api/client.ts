@@ -424,6 +424,7 @@ export const api = {
     gscServiceAccountJson?: string;
     status?: "ACTIVE" | "DISABLED";
   }) => request<SiteDto>(`/sites/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteSite: (id: string) => request<{ ok: true; id: string; hiddenContent: number }>(`/sites/${id}`, { method: "DELETE" }),
   testWordPress: (id: string) => request<{ id: string; status: IntegrationStatus; message: string }>(`/sites/${id}/test-wordpress`, { method: "POST" }),
   testRankMath: (id: string) => request<{ id: string; status: IntegrationStatus; message: string }>(`/sites/${id}/test-rankmath`, { method: "POST" }),
   testGsc: (id: string) => request<{ id: string; status: IntegrationStatus; message: string }>(`/sites/${id}/test-gsc`, { method: "POST" }),

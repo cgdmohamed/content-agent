@@ -64,6 +64,7 @@ class ReportsController {
          COALESCE((SELECT SUM(estimated_cost_usd)::text FROM api_usage_logs a WHERE a.content_item_id IN (SELECT id FROM content_items WHERE site_id = $1)), '0') AS ai_cost
        FROM content_items
        WHERE site_id = $1
+         AND EXISTS (SELECT 1 FROM sites s WHERE s.id = $1 AND s.status <> 'DELETED')
          AND created_at >= $2
          AND created_at < $3`,
       [siteId, range.from, range.toExclusive]
@@ -81,6 +82,7 @@ class ReportsController {
       `SELECT id, title, topic, target_keyword, selected_idea, draft_html, content_score, status, created_at, published_at
        FROM content_items
        WHERE site_id = $1
+         AND EXISTS (SELECT 1 FROM sites s WHERE s.id = $1 AND s.status <> 'DELETED')
          AND created_at >= $2
          AND created_at < $3
        ORDER BY created_at DESC
@@ -113,7 +115,7 @@ class ReportsController {
       wordpress_url: string;
       wordpress_username: string;
       wordpress_application_password_encrypted: string;
-    }>("SELECT id, name, wordpress_url, wordpress_username, wordpress_application_password_encrypted FROM sites WHERE id = $1", [siteId]);
+    }>("SELECT id, name, wordpress_url, wordpress_username, wordpress_application_password_encrypted FROM sites WHERE id = $1 AND status <> 'DELETED'", [siteId]);
     if (!siteResult.rowCount) throw new Error("الموقع غير موجود.");
     const site = siteResult.rows[0]!;
     const [pages, contentRows] = await Promise.all([
@@ -121,7 +123,8 @@ class ReportsController {
       this.db.query<SiteAuditContentRow>(
         `SELECT id, title, wordpress_post_url, status
          FROM content_items
-         WHERE site_id = $1 AND wordpress_post_url IS NOT NULL`,
+         WHERE site_id = $1 AND wordpress_post_url IS NOT NULL
+           AND EXISTS (SELECT 1 FROM sites s WHERE s.id = $1 AND s.status <> 'DELETED')`,
         [siteId]
       )
     ]);

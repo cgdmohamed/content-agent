@@ -544,7 +544,8 @@ class ContentService {
       `SELECT c.*, s.name AS site_name, s.wordpress_url
        FROM content_items c
        JOIN sites s ON s.id = c.site_id
-       WHERE c.id = $1`,
+       WHERE c.id = $1
+         AND s.status <> 'DELETED'`,
       [id]
     );
     if (!result.rowCount) throw new NotFoundException("عنصر المحتوى غير موجود");
@@ -1535,7 +1536,7 @@ export function mergeContentActivity(
 }
 
 export function buildContentListFilter(query: ContentListQuery): ContentListFilter {
-  const clauses: string[] = [];
+  const clauses: string[] = ["s.status <> 'DELETED'"];
   const values: unknown[] = [];
   const addValue = (value: unknown): string => {
     values.push(value);
