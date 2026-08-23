@@ -285,6 +285,68 @@ export interface SiteReportDto {
   }>;
 }
 
+export interface SiteAuditDto {
+  siteId: string;
+  siteName: string;
+  scannedAt: string;
+  score: number;
+  totals: {
+    pages: number;
+    posts: number;
+    issues: number;
+    high: number;
+    medium: number;
+    low: number;
+  };
+  checklist: Array<{
+    id: string;
+    label: string;
+    count: number;
+    priority: "HIGH" | "MEDIUM" | "LOW";
+    action: "OPTIMIZE_LINKS" | "EDIT_WORDPRESS" | "ADD_IMAGE" | "ADD_SCHEMA" | "REVIEW_MANUALLY";
+  }>;
+  pages: Array<{
+    id: string;
+    type: "post" | "page";
+    title: string;
+    url: string;
+    status: string;
+    modified: string | null;
+    contentItemId: string | null;
+    score: number;
+    metrics: {
+      wordCount: number;
+      h1Count: number;
+      h2Count: number;
+      internalLinks: number;
+      externalLinks: number;
+      images: number;
+      imagesMissingAlt: number;
+      hasFaq: boolean;
+      hasCta: boolean;
+      titleLength: number;
+      slugLength: number;
+      excerptLength: number;
+    };
+    issues: SiteAuditIssueDto[];
+  }>;
+  issues: SiteAuditIssueDto[];
+}
+
+export interface SiteAuditIssueDto {
+  id: string;
+  pageId: string;
+  pageTitle: string;
+  pageUrl: string;
+  type: "post" | "page";
+  severity: "HIGH" | "MEDIUM" | "LOW";
+  category: "SEO" | "AEO" | "GEO" | "CONTENT" | "TECHNICAL" | "UX" | "RANKMATH";
+  message: string;
+  recommendation: string;
+  action: "OPTIMIZE_LINKS" | "EDIT_WORDPRESS" | "ADD_IMAGE" | "ADD_SCHEMA" | "REVIEW_MANUALLY";
+  contentItemId?: string | null;
+}
+
 export interface AuditEventDto {
   id: string;
   actorUserId: string | null;
@@ -395,6 +457,7 @@ export const api = {
     if (params?.to) search.set("to", params.to);
     return request<SiteReportDto>(`/reports/sites/${siteId}${search.size ? `?${search.toString()}` : ""}`);
   },
+  siteAudit: (siteId: string) => request<SiteAuditDto>(`/reports/sites/${siteId}/audit`),
   audit: () => request<AuditEventDto[]>("/audit")
 };
 

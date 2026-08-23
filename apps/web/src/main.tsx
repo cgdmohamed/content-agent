@@ -15,6 +15,7 @@ const Operations = lazy(() => import("./views/Operations").then((module) => ({ d
 const Users = lazy(() => import("./views/Users").then((module) => ({ default: module.Users })));
 const Settings = lazy(() => import("./views/Settings").then((module) => ({ default: module.Settings })));
 const SiteReport = lazy(() => import("./views/SiteReport").then((module) => ({ default: module.SiteReport })));
+const SiteAudit = lazy(() => import("./views/SiteAudit").then((module) => ({ default: module.SiteAudit })));
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
@@ -26,6 +27,7 @@ createRoot(document.getElementById("root")!).render(
             <Route path="content" element={<RouteView><ContentLibrary /></RouteView>} />
             <Route path="content/:id" element={<RouteView><ArticleWorkspace /></RouteView>} />
             <Route path="sites" element={<RouteView><Sites /></RouteView>} />
+            <Route path="site-audit" element={<RouteView><SiteAudit /></RouteView>} />
             <Route path="sites/:id/report" element={<RouteView><SiteReport /></RouteView>} />
             <Route path="operations" element={<RouteView><Operations /></RouteView>} />
             <Route path="users" element={<RouteView><Users /></RouteView>} />

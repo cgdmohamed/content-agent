@@ -13,6 +13,7 @@ const nav = [
   { to: "/", label: "لوحة التحكم", icon: BarChart3, adminOnly: false },
   { to: "/content", label: "مكتبة المحتوى", icon: FileText, adminOnly: false },
   { to: "/sites", label: "المواقع", icon: Globe2, adminOnly: false },
+  { to: "/site-audit", label: "فحص الموقع", icon: ShieldCheck, adminOnly: true },
   { to: "/operations", label: "العمليات", icon: ListChecks, adminOnly: true },
   { to: "/users", label: "المستخدمون", icon: Users, adminOnly: true },
   { to: "/settings", label: "الإعدادات", icon: Settings, adminOnly: true }
@@ -110,7 +111,7 @@ export function AppShell(): ReactElement {
 }
 
 function isAdminPath(pathname: string): boolean {
-  return pathname === "/operations" || pathname === "/users" || pathname === "/settings" || /^\/sites\/[^/]+\/report$/.test(pathname);
+  return pathname === "/operations" || pathname === "/users" || pathname === "/settings" || pathname === "/site-audit" || /^\/sites\/[^/]+\/report$/.test(pathname);
 }
 
 function LoginScreen(): ReactElement {
