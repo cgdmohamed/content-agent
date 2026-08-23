@@ -21,12 +21,12 @@ class DashboardController {
     }>(
       `SELECT
          COUNT(*)::text AS total_content,
-         COUNT(*) FILTER (WHERE status NOT IN ('PUBLISHED', 'FAILED', 'DUPLICATE'))::text AS pipeline,
-         COUNT(*) FILTER (WHERE status = 'PUBLISHED')::text AS published,
-         COUNT(*) FILTER (WHERE status = 'FAILED' OR content_score < 60)::text AS needs_attention,
-         COUNT(*) FILTER (WHERE status = 'SCHEDULED')::text AS scheduled,
+         COUNT(*) FILTER (WHERE c.status NOT IN ('PUBLISHED', 'FAILED', 'DUPLICATE'))::text AS pipeline,
+         COUNT(*) FILTER (WHERE c.status = 'PUBLISHED')::text AS published,
+         COUNT(*) FILTER (WHERE c.status = 'FAILED' OR c.content_score < 60)::text AS needs_attention,
+         COUNT(*) FILTER (WHERE c.status = 'SCHEDULED')::text AS scheduled,
          COALESCE((SELECT SUM(estimated_cost_usd)::text FROM api_usage_logs WHERE created_at >= date_trunc('month', now())), '0') AS monthly_ai_spend,
-         ROUND(AVG(NULLIF(content_score, 0)))::text AS average_score
+         ROUND(AVG(NULLIF(c.content_score, 0)))::text AS average_score
        FROM content_items c
        JOIN sites s ON s.id = c.site_id
        WHERE s.status <> 'DELETED'`
