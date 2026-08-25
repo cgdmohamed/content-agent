@@ -217,8 +217,8 @@ First deployment procedure:
 2. Select Docker Compose and use `docker-compose.yml`.
 3. Set the public service to `web` and the public internal port to `80`.
 4. Add the required environment variables in Coolify. `PUBLIC_WEB_URL` must be the final HTTPS dashboard URL. `DATABASE_URL` must use `postgres` as the hostname, for example `postgresql://content_agent:URL_ENCODED_PASSWORD@postgres:5432/content_agent`. `REDIS_URL` must be `redis://redis:6379`.
-5. Deploy. The `api` service waits for healthy PostgreSQL and Redis, runs non-destructive SQL migrations on startup under a PostgreSQL advisory lock, then exposes `/api/health/ready`.
-6. The `worker` service starts only after the API is healthy, so queue processing begins after migrations are complete.
+5. Deploy. The `api` service waits for healthy PostgreSQL and Redis, runs non-destructive SQL migrations on startup under a PostgreSQL advisory lock, and uses `/api/health/live` for the container healthcheck.
+6. The `web` and `worker` services start after the API container starts, while `/api/health/ready` remains the manual readiness check for PostgreSQL and Redis connectivity.
 7. Keep the same `ENCRYPTION_KEY_BASE64` forever unless you intentionally build a re-encryption process for stored WordPress/GSC secrets.
 
 For a short launch checklist, see `PRODUCTION_CHECKLIST.md`.
