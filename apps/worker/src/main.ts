@@ -88,10 +88,15 @@ function nextPrimaryOperation(state: ContentState): ContentOperation | null {
   }
 }
 
+console.info("بدء تشغيل عامل وكيل المحتوى...");
 const env = loadEnv();
+console.info(`تم تحميل إعدادات العامل. عدد العمليات المتوازية: ${env.WORKER_CONCURRENCY}`);
 
 const connection = new Redis(env.REDIS_URL, {
   maxRetriesPerRequest: null
+});
+connection.on("error", (error) => {
+  console.error(`خطأ اتصال Redis في العامل: ${error.message}`);
 });
 
 const workers: Worker[] = [];

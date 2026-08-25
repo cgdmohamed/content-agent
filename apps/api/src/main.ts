@@ -12,8 +12,11 @@ import { requestIdMiddleware } from "./security/request-id.js";
 import { validationExceptionFactory } from "./security/validation-errors.js";
 
 async function bootstrap(): Promise<void> {
+  console.info("بدء تشغيل API...");
   const env = loadEnv();
+  console.info(`تم تحميل إعدادات API. المنفذ: ${env.API_PORT}`);
   const app = await NestFactory.create(AppModule);
+  console.info("تم إنشاء تطبيق API.");
   app.getHttpAdapter().getInstance().set("trust proxy", 1);
   app.enableShutdownHooks();
   app.setGlobalPrefix("api");
@@ -37,6 +40,7 @@ async function bootstrap(): Promise<void> {
   app.useGlobalFilters(new ApiExceptionFilter());
   const port = env.API_PORT;
   await app.listen(port);
+  console.info(`API جاهز ويستمع على المنفذ ${port}.`);
 }
 
 void bootstrap().catch((error: unknown) => {
