@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+
 const [, , target, label = "service"] = process.argv;
 
 function formatError(error) {
@@ -39,9 +41,19 @@ if (!target) {
 console.info(`[startup:${label}] loading ${target}`);
 
 try {
+  await validateRuntimeEnv(label);
   await import(new URL(target, `file://${process.cwd()}/`));
 } catch (error) {
   console.error(`[startup:${label}] failed to load ${target}`);
   console.error(formatError(error));
   process.exit(1);
+}
+
+async function validateRuntimeEnv(label) {
+  const configModule = "/app/packages/config/dist/index.js";
+  if (!existsSync(configModule)) return;
+  console.info(`[startup:${label}] validating runtime environment`);
+  const { loadEnv } = await import(`file://${configModule}`);
+  loadEnv();
+  console.info(`[startup:${label}] runtime environment is valid`);
 }
