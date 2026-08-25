@@ -181,6 +181,44 @@ Health endpoints:
 - `GET /api/health/ready` verifies both PostgreSQL and Redis. It returns HTTP 200 when ready and HTTP 503 when degraded.
 - `GET /healthz` verifies the web container is serving traffic.
 
+### Deploying with Coolify
+
+Use `docker-compose.yml` as the Coolify Docker Compose file. The only public service is `web` on internal port `80`; Coolify should route the public domain to that service. The `web` container proxies `/api` requests to `api:3000` over the internal Docker network. PostgreSQL and Redis are internal only and have no host port bindings.
+
+Required Coolify environment variables:
+
+- `POSTGRES_PASSWORD`
+- `PUBLIC_WEB_URL`
+- `SESSION_SECRET`
+- `ENCRYPTION_KEY_BASE64`
+- `BOOTSTRAP_ADMIN_EMAIL`
+- `BOOTSTRAP_ADMIN_PASSWORD`
+
+Optional Coolify environment variables:
+
+- `VITE_API_URL` defaults to `/api`
+- `OPENAI_API_KEY`
+- `ANTHROPIC_API_KEY`
+- `PERPLEXITY_API_KEY`
+- `GEMINI_API_KEY`
+- `OPENAI_MODEL` defaults to `gpt-4o-mini`
+- `ANTHROPIC_MODEL` defaults to `claude-3-5-sonnet-latest`
+- `PERPLEXITY_MODEL` defaults to `sonar-pro`
+- `GEMINI_IMAGE_MODEL` defaults to `gemini-3.1-flash-image`
+- `MONTHLY_AI_BUDGET_USD` defaults to `30`
+- `MONTHLY_AI_HARD_LIMIT_USD` defaults to `40`
+- `WORKER_CONCURRENCY` defaults to `2`
+
+First deployment procedure:
+
+1. Create a new Coolify project from the GitHub repository.
+2. Select Docker Compose and use `docker-compose.yml`.
+3. Set the public service to `web` and the public internal port to `80`.
+4. Add the required environment variables in Coolify. `PUBLIC_WEB_URL` must be the final HTTPS dashboard URL.
+5. Deploy. The `api` service waits for healthy PostgreSQL and Redis, runs non-destructive SQL migrations on startup under a PostgreSQL advisory lock, then exposes `/api/health/ready`.
+6. The `worker` service starts only after the API is healthy, so queue processing begins after migrations are complete.
+7. Keep the same `ENCRYPTION_KEY_BASE64` forever unless you intentionally build a re-encryption process for stored WordPress/GSC secrets.
+
 For a short launch checklist, see `PRODUCTION_CHECKLIST.md`.
 
 ### Operations Runbook
