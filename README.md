@@ -189,8 +189,6 @@ Required Coolify environment variables:
 
 - `POSTGRES_PASSWORD`
 - `PUBLIC_WEB_URL`
-- `DATABASE_URL`
-- `REDIS_URL`
 - `SESSION_SECRET`
 - `ENCRYPTION_KEY_BASE64`
 - `BOOTSTRAP_ADMIN_EMAIL`
@@ -216,7 +214,7 @@ First deployment procedure:
 1. Create a new Coolify project from the GitHub repository.
 2. Select Docker Compose and use `docker-compose.yml`.
 3. Set the public service to `web` and the public internal port to `80`.
-4. Add the required environment variables in Coolify. `PUBLIC_WEB_URL` must be the final HTTPS dashboard URL. `DATABASE_URL` must use `postgres` as the hostname, for example `postgresql://content_agent:URL_ENCODED_PASSWORD@postgres:5432/content_agent`. `REDIS_URL` must be `redis://redis:6379`.
+4. Add the required environment variables in Coolify. `PUBLIC_WEB_URL` must be the final HTTPS dashboard URL. `POSTGRES_PASSWORD` should use URL-safe characters because Compose embeds it in the internal PostgreSQL URL. `DATABASE_URL` and `REDIS_URL` are created by `docker-compose.yml` from the internal service names.
 5. Deploy. The `api` service waits for healthy PostgreSQL and Redis, runs non-destructive SQL migrations on startup under a PostgreSQL advisory lock, and uses `/api/health/live` for the container healthcheck.
 6. The `web` and `worker` services start after the API container starts, while `/api/health/ready` remains the manual readiness check for PostgreSQL and Redis connectivity.
 7. Keep the same `ENCRYPTION_KEY_BASE64` forever unless you intentionally build a re-encryption process for stored WordPress/GSC secrets.
