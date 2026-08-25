@@ -35,8 +35,14 @@ export function productionWarnings(env, raw) {
   if (localhostUrl(env.REDIS_URL)) {
     warnings.push("REDIS_URL يشير إلى localhost؛ استخدم اسم خدمة Redis داخل Docker مثل redis.");
   }
-  if (String(raw.POSTGRES_PASSWORD ?? "").trim() && !String(env.DATABASE_URL).includes(String(raw.POSTGRES_PASSWORD))) {
+  if (String(raw.POSTGRES_PASSWORD ?? "").trim() && databasePassword(env.DATABASE_URL) !== String(raw.POSTGRES_PASSWORD)) {
     warnings.push("DATABASE_URL لا يبدو أنه يستخدم POSTGRES_PASSWORD الحالي.");
+  }
+  if (urlHostname(env.DATABASE_URL) !== "postgres") {
+    warnings.push("DATABASE_URL يجب أن يستخدم اسم خدمة PostgreSQL الداخلي: postgres.");
+  }
+  if (urlHostname(env.REDIS_URL) !== "redis") {
+    warnings.push("REDIS_URL يجب أن يستخدم اسم خدمة Redis الداخلي: redis.");
   }
   return warnings;
 }
@@ -56,10 +62,22 @@ function decodedPlaceholderSecret(key, value) {
 }
 
 function localhostUrl(value) {
+  const host = urlHostname(value);
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
+}
+
+function urlHostname(value) {
   try {
-    const host = new URL(value).hostname;
-    return host === "localhost" || host === "127.0.0.1" || host === "::1";
+    return new URL(value).hostname;
   } catch {
-    return false;
+    return "";
+  }
+}
+
+function databasePassword(value) {
+  try {
+    return decodeURIComponent(new URL(value).password);
+  } catch {
+    return "";
   }
 }

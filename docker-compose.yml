@@ -40,8 +40,8 @@ services:
       NODE_ENV: production
       API_PORT: 3000
       PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:?PUBLIC_WEB_URL is required}
-      DATABASE_URL: postgresql://content_agent:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/content_agent
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      REDIS_URL: ${REDIS_URL:?REDIS_URL is required}
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required}
       ENCRYPTION_KEY_BASE64: ${ENCRYPTION_KEY_BASE64:?ENCRYPTION_KEY_BASE64 is required}
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:?BOOTSTRAP_ADMIN_EMAIL is required for first deploy}
@@ -83,8 +83,8 @@ services:
       NODE_ENV: production
       API_PORT: 3000
       PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:?PUBLIC_WEB_URL is required}
-      DATABASE_URL: postgresql://content_agent:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/content_agent
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      REDIS_URL: ${REDIS_URL:?REDIS_URL is required}
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required}
       ENCRYPTION_KEY_BASE64: ${ENCRYPTION_KEY_BASE64:?ENCRYPTION_KEY_BASE64 is required}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}

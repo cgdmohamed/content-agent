@@ -15,6 +15,17 @@ describe("production preflight", () => {
     expect(productionWarnings(productionEnv, { POSTGRES_PASSWORD: "very-strong-db-password" })).toEqual([]);
   });
 
+  it("accepts URL-encoded database passwords in DATABASE_URL", () => {
+    const password = "very-strong@db#password";
+    const encoded = encodeURIComponent(password);
+    expect(
+      productionWarnings(
+        { ...productionEnv, DATABASE_URL: `postgresql://content_agent:${encoded}@postgres:5432/content_agent` },
+        { POSTGRES_PASSWORD: password }
+      )
+    ).toEqual([]);
+  });
+
   it("rejects common unsafe production settings", () => {
     const warnings = productionWarnings(
       {
