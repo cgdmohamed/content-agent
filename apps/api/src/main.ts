@@ -43,7 +43,7 @@ async function bootstrap(): Promise<void> {
   console.info(`API جاهز ويستمع على المنفذ ${port}.`);
 }
 
-void bootstrap().catch((error: unknown) => {
+await bootstrap().catch((error: unknown) => {
   console.error("فشل تشغيل API.");
   console.error(error instanceof Error ? error.stack || error.message : String(error));
   process.exit(1);
