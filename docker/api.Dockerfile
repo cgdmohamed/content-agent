@@ -29,7 +29,8 @@ COPY --from=build /app/packages/shared/package.json /app/packages/shared/package
 COPY --from=build /app/packages/shared/dist /app/packages/shared/dist
 COPY --from=build /app/packages/types/package.json /app/packages/types/package.json
 COPY --from=build /app/packages/types/dist /app/packages/types/dist
+COPY docker/node-entrypoint.mjs /app/docker/node-entrypoint.mjs
 WORKDIR /app/apps/api
 EXPOSE 3000
 USER node
-CMD ["node", "dist/main.js"]
+CMD ["node", "/app/docker/node-entrypoint.mjs", "dist/main.js", "api"]

@@ -39,4 +39,8 @@ async function bootstrap(): Promise<void> {
   await app.listen(port);
 }
 
-void bootstrap();
+void bootstrap().catch((error: unknown) => {
+  console.error("فشل تشغيل API.");
+  console.error(error instanceof Error ? error.stack || error.message : String(error));
+  process.exit(1);
+});
