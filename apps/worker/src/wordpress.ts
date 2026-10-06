@@ -1,6 +1,7 @@
 import { sanitizeArticleHtml } from "./html-sanitizer.js";
 import { decryptSecret } from "./secrets.js";
 import { safeExternalUrl } from "./url-safety.js";
+import { safeFetch } from "@content-agent/shared/safe-fetch";
 
 export interface WordPressSite {
   wordpress_url: string;
@@ -67,8 +68,8 @@ export async function publishPost(site: WordPressSite, input: WordPressPostInput
   if (tagIds.length) body.tags = tagIds;
   if (input.featuredMediaId) body.featured_media = Number(input.featuredMediaId);
 
-  const response = await fetch(endpoint, {
-    method: input.wordpressPostId ? "POST" : "POST",
+  const response = await safeFetch(endpoint, {
+    method: "POST",
     headers: { Authorization: auth, "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(120_000)
@@ -89,7 +90,7 @@ export async function uploadMedia(site: WordPressSite, input: { bytes: Buffer; m
   const base = safeBaseUrl(site.wordpress_url);
   const auth = authHeader(site);
   const endpoint = new URL("/wp-json/wp/v2/media", base);
-  const response = await fetch(endpoint, {
+  const response = await safeFetch(endpoint, {
     method: "POST",
     headers: {
       Authorization: auth,
@@ -105,7 +106,7 @@ export async function uploadMedia(site: WordPressSite, input: { bytes: Buffer; m
     throw new Error(data.message ?? `فشل رفع الصورة إلى ووردبريس برمز ${response.status}`);
   }
   if (input.altText?.trim()) {
-    await fetch(new URL(`/wp-json/wp/v2/media/${data.id}`, base), {
+    await safeFetch(new URL(`/wp-json/wp/v2/media/${data.id}`, base), {
       method: "POST",
       headers: { Authorization: auth, "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ alt_text: input.altText.trim() }),
@@ -127,7 +128,7 @@ export async function searchWordPressInternalContent(site: WordPressSite, search
       endpoint.searchParams.set("search", term);
       endpoint.searchParams.set("per_page", "10");
       endpoint.searchParams.set("subtype", subtype);
-      const response = await fetch(endpoint, {
+      const response = await safeFetch(endpoint, {
         headers: { Authorization: auth, Accept: "application/json" },
         signal: AbortSignal.timeout(30_000)
       });
@@ -153,7 +154,7 @@ async function getOrCreateTerm(base: URL, auth: string, taxonomy: "categories" |
   const searchUrl = new URL(`/wp-json/wp/v2/${taxonomy}`, base);
   searchUrl.searchParams.set("search", trimmed);
   searchUrl.searchParams.set("per_page", "20");
-  const searchResponse = await fetch(searchUrl, {
+  const searchResponse = await safeFetch(searchUrl, {
     headers: { Authorization: auth, Accept: "application/json" },
     signal: AbortSignal.timeout(30_000)
   });
@@ -165,7 +166,7 @@ async function getOrCreateTerm(base: URL, auth: string, taxonomy: "categories" |
   if (exact) return exact.id;
 
   const createUrl = new URL(`/wp-json/wp/v2/${taxonomy}`, base);
-  const createResponse = await fetch(createUrl, {
+  const createResponse = await safeFetch(createUrl, {
     method: "POST",
     headers: { Authorization: auth, "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ name: trimmed }),

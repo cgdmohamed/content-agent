@@ -19,5 +19,15 @@
     "@types/sanitize-html": "^2.16.1",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./safe-fetch": {
+      "types": "./dist/safe-fetch.d.ts",
+      "default": "./dist/safe-fetch.js"
+    }
   }
 }

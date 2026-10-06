@@ -56,6 +56,15 @@ export async function markJobFailed(bullJobId: string, error: string, durationMs
   );
 }
 
+export async function markJobRetrying(bullJobId: string, error: string, durationMs: number): Promise<void> {
+  await query(
+    `UPDATE job_runs
+     SET status = 'WAITING', duration_ms = $2, error = $3
+     WHERE bull_job_id = $1`,
+    [bullJobId, durationMs, error]
+  );
+}
+
 export async function setContentFailure(contentItemId: string, operation: string, error: string): Promise<void> {
   await query(
     `UPDATE content_items

@@ -46,6 +46,7 @@ The API uses an HTTP-only `content_agent_session` cookie. All API routes require
 The web app checks `GET /api/auth/me` on load and shows an Arabic login screen when no session exists. Logout clears the HTTP-only session cookie.
 The navigation hides Admin-only screens for Editors, while backend guards remain the source of truth for authorization.
 Malformed, tampered, expired, or structurally incomplete session cookies are treated as unauthenticated requests rather than internal server errors.
+Sessions are revalidated against the `users` table on every request: disabling a user, changing their role, resetting their password, or logging out bumps `users.token_version`, which invalidates all previously issued cookies immediately (logout therefore signs the user out of every device). Role and identity are always read from the database, never trusted from the cookie.
 Every API response includes an `x-request-id` header. If the client sends a safe `x-request-id`, the API echoes it; otherwise the API generates a new UUID. Error responses also include `requestId`, so an operator can match a browser-visible failure to API logs without exposing stack traces to the user.
 In production, unexpected API exceptions return the Arabic message `حدث خطأ غير متوقع. حاول مرة أخرى لاحقًا.` with the request id. Expected validation, authorization, and workflow errors keep their Arabic business message and any safe structured details needed by the UI.
 DTO validation errors are normalized into Arabic messages before reaching the web app, including unknown-field, type, range, length, date, URL, and enum validation failures.
@@ -58,6 +59,7 @@ Role rules currently enforced server-side:
 
 Frontend checks are only convenience; backend guards are the source of truth.
 Unsafe authenticated writes also verify the request origin against `PUBLIC_WEB_URL`, which protects cookie-based sessions from cross-site write attempts.
+Outbound requests to user-configured WordPress sites go through `safeFetch` (`@content-agent/shared/safe-fetch`): the hostname must resolve only to public addresses, redirects are followed manually with every hop re-validated, and credentials are dropped on cross-origin redirects.
 Generated and manually edited article HTML is sanitized with an allowlist before storage or WordPress publishing. Executable tags, event handlers, iframes, protocol-relative URLs, and `javascript:` links are stripped.
 Admin user management supports creating users, changing roles, activating/disabling accounts, and resetting passwords. The API prevents disabling or demoting the last active Admin account.
 User emails are enforced as case-insensitively unique at the PostgreSQL index level, and create-user races return a clear conflict response instead of a generic server error.
@@ -108,7 +110,7 @@ Never copy hardcoded legacy secrets into source code.
 
 ## WordPress Setup
 
-Use WordPress Application Passwords for REST authentication. Rank Math metadata requires the bridge snippet from `wordpress-snippets/rankmath-rest-bridge.php`; the Sites page exposes a bridge test so Admins can distinguish `Connected`, `Bridge Missing`, and `Permission Error`.
+Use WordPress Application Passwords for REST authentication. Rank Math metadata requires the bridge snippet from the plugin in `wordpress/content-agent-rankmath-bridge/` (also packaged as `wordpress/content-agent-rankmath-bridge.zip`); the Sites page exposes a bridge test so Admins can distinguish `Connected`, `Bridge Missing`, and `Permission Error`.
 Admins can edit site settings after creation. WordPress application passwords and GSC service-account JSON are never returned to the frontend; leaving those edit fields blank keeps the existing encrypted secret, while entering a new value replaces it.
 
 ## Production
@@ -172,7 +174,7 @@ The test suite covers shared workflow logic, environment validation, API securit
 8. Build and run:
 
 ```bash
-docker compose -f docker-compose.prod.yml up --build -d
+docker compose up --build -d
 ```
 
 Health endpoints:
@@ -183,7 +185,7 @@ Health endpoints:
 
 ### Deploying with Coolify
 
-Use `docker-compose.yml` as the Coolify Docker Compose file. The only public service is `web` on internal port `80`; Coolify should route the public domain to that service. The `web` container proxies `/api` requests to `api:3000` over the internal Docker network. PostgreSQL and Redis are internal only and have no host port bindings.
+Use `docker-compose.yml` (the single Compose file for local production runs and Coolify) as the Coolify Docker Compose file. The only public service is `web` on internal port `80`; Coolify should route the public domain to that service. The `web` container proxies `/api` requests to `api:3000` over the internal Docker network. PostgreSQL and Redis are internal only and have no host port bindings.
 
 Required Coolify environment variables:
 

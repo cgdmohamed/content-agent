@@ -2,6 +2,7 @@ import { CanActivate, ExecutionContext, ForbiddenException, Injectable, SetMetad
 import { Reflector } from "@nestjs/core";
 import { loadEnv } from "@content-agent/config";
 import type { Request } from "express";
+import { DatabaseService } from "../database/database.module.js";
 import { parseSessionCookie, type SessionUser } from "./session-cookie.js";
 
 export const PUBLIC_ROUTE = "publicRoute";
@@ -17,16 +18,21 @@ export type AuthenticatedRequest = Request & {
 
 @Injectable()
 export class SessionGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector) {}
+  constructor(
+    private readonly reflector: Reflector,
+    private readonly db: DatabaseService
+  ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const isPublic = this.reflector.getAllAndOverride<boolean>(PUBLIC_ROUTE, [context.getHandler(), context.getClass()]);
     if (isPublic) return true;
 
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
-    const user = parseSessionCookie(request.cookies?.content_agent_session);
-    if (!user) throw new UnauthorizedException("يجب تسجيل الدخول أولًا.");
+    const cookieUser = parseSessionCookie(request.cookies?.content_agent_session);
+    if (!cookieUser) throw new UnauthorizedException("يجب تسجيل الدخول أولًا.");
     this.assertTrustedWriteOrigin(request);
+    const user = await resolveActiveSessionUser(this.db, cookieUser);
+    if (!user) throw new UnauthorizedException("يجب تسجيل الدخول أولًا.");
 
     const allowedRoles = this.reflector.getAllAndOverride<Array<SessionUser["role"]>>(ROLES, [context.getHandler(), context.getClass()]);
     if (allowedRoles?.length && !allowedRoles.includes(user.role)) {
@@ -57,4 +63,25 @@ function originOf(value: string): string {
 export function isTrustedWriteSource(source: string | undefined, allowed: string): boolean {
   if (!source) return false;
   return originOf(source) === originOf(allowed);
+}
+
+interface SessionUserRow {
+  name: string;
+  email: string;
+  role: SessionUser["role"];
+  status: "ACTIVE" | "DISABLED";
+  token_version: number;
+}
+
+/**
+ * Re-validates a signed session cookie against the users table so that disabling a
+ * user, changing their role, resetting their password, or logging out takes effect
+ * immediately instead of when the cookie expires. Role and identity come from the
+ * database, never from the cookie payload.
+ */
+export async function resolveActiveSessionUser(db: Pick<DatabaseService, "query">, cookieUser: SessionUser): Promise<SessionUser | null> {
+  const result = await db.query<SessionUserRow>("SELECT name, email, role, status, token_version FROM users WHERE id = $1", [cookieUser.id]);
+  const row = result.rows[0];
+  if (!row || row.status !== "ACTIVE" || row.token_version !== cookieUser.tv) return null;
+  return { ...cookieUser, name: row.name, email: row.email, role: row.role };
 }

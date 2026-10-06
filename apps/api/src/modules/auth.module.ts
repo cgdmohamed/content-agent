@@ -4,7 +4,7 @@ import bcrypt from "bcryptjs";
 import type { CookieOptions, Request, Response } from "express";
 import { AuditService } from "../audit/audit.module.js";
 import { DatabaseService } from "../database/database.module.js";
-import { Public } from "../security/access-control.js";
+import { Public, resolveActiveSessionUser } from "../security/access-control.js";
 import { LoginRateLimiter } from "../security/login-rate-limit.js";
 import { fieldLimits } from "../security/payload-limits.js";
 import { passwordPolicyIssues, strongPasswordMessage } from "../security/password-policy.js";
@@ -28,6 +28,7 @@ interface UserRow {
   password_hash: string;
   role: "ADMIN" | "EDITOR";
   status: "ACTIVE" | "DISABLED";
+  token_version: number;
 }
 
 type CookieRequest = Request & { cookies?: Record<string, string | undefined> };
@@ -65,7 +66,7 @@ class AuthService implements OnModuleInit {
   async login(email: string, password: string, ip: string): Promise<Omit<SessionUser, "exp">> {
     this.assertLoginAllowed(email, ip);
     const result = await this.db.query<UserRow>(
-      "SELECT id, name, email, password_hash, role, status FROM users WHERE lower(email) = lower($1)",
+      "SELECT id, name, email, password_hash, role, status, token_version FROM users WHERE lower(email) = lower($1)",
       [email]
     );
     const user = result.rows[0];
@@ -88,11 +89,23 @@ class AuthService implements OnModuleInit {
       message: "تم تسجيل الدخول بنجاح",
       metadata: { email: user.email }
     });
-    return { id: user.id, name: user.name, email: user.email, role: user.role };
+    return { id: user.id, name: user.name, email: user.email, role: user.role, tv: user.token_version };
   }
 
-  me(request: CookieRequest): SessionUser | null {
+  /** Returns the signed-cookie user without consulting the database (used where only the identity is needed). */
+  cookieUser(request: CookieRequest): SessionUser | null {
     return parseSessionCookie(request.cookies?.content_agent_session);
+  }
+
+  async me(request: CookieRequest): Promise<SessionUser | null> {
+    const cookieUser = this.cookieUser(request);
+    if (!cookieUser) return null;
+    return resolveActiveSessionUser(this.db, cookieUser);
+  }
+
+  /** Revokes every session issued to this user by bumping the token version. */
+  async revokeSessions(userId: string): Promise<void> {
+    await this.db.query("UPDATE users SET token_version = token_version + 1 WHERE id = $1", [userId]);
   }
 
   async recordLogout(user: SessionUser): Promise<void> {
@@ -135,24 +148,31 @@ class AuthController {
 
   @Post("login")
   @Public()
-  async login(@Body() body: LoginDto, @Req() request: Request, @Res({ passthrough: true }) response: Response): Promise<{ user: Omit<SessionUser, "exp"> }> {
+  async login(@Body() body: LoginDto, @Req() request: Request, @Res({ passthrough: true }) response: Response): Promise<{ user: Omit<SessionUser, "exp" | "tv"> }> {
     const user = await this.auth.login(body.email, body.password, clientIp(request));
     response.cookie(SESSION_COOKIE_NAME, createSessionCookie(user), sessionCookieOptions());
-    return { user };
+    const { tv: _tv, ...publicUser } = user;
+    return { user: publicUser };
   }
 
   @Post("logout")
   async logout(@Req() request: CookieRequest, @Res({ passthrough: true }) response: Response): Promise<{ ok: true }> {
-    const user = this.auth.me(request);
+    const user = await this.auth.me(request);
     response.clearCookie(SESSION_COOKIE_NAME, clearSessionCookieOptions());
-    if (user) await this.auth.recordLogout(user);
+    if (user) {
+      await this.auth.revokeSessions(user.id);
+      await this.auth.recordLogout(user);
+    }
     return { ok: true };
   }
 
   @Get("me")
   @Public()
-  me(@Req() request: CookieRequest): SessionUser | null {
-    return this.auth.me(request);
+  async me(@Req() request: CookieRequest): Promise<Omit<SessionUser, "tv"> | null> {
+    const user = await this.auth.me(request);
+    if (!user) return null;
+    const { tv: _tv, ...publicUser } = user;
+    return publicUser;
   }
 }
 

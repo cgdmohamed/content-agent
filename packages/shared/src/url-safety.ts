@@ -43,7 +43,10 @@ function isBlockedIpv4(hostname: string): boolean {
     (first === 169 && second === 254) ||
     (first === 172 && second >= 16 && second <= 31) ||
     (first === 192 && second === 168) ||
-    (first === 100 && second >= 64 && second <= 127)
+    (first === 100 && second >= 64 && second <= 127) ||
+    (first === 192 && second === 0 && (octets[2] ?? 0) === 0) ||
+    (first === 198 && (second === 18 || second === 19)) ||
+    first >= 224
   );
 }
 
@@ -51,6 +54,24 @@ function isBlockedIpv6(hostname: string): boolean {
   if (!hostname.includes(":")) return false;
   if (hostname === "::1" || hostname === "::") return true;
   const normalized = hostname.toLowerCase();
-  return normalized.startsWith("fc") || normalized.startsWith("fd") || normalized.startsWith("fe80:");
+  const mapped = ipv4FromMappedIpv6(normalized);
+  if (mapped) return isBlockedIpv4(mapped);
+  return (
+    normalized.startsWith("fc") ||
+    normalized.startsWith("fd") ||
+    /^fe[89ab]/.test(normalized) ||
+    normalized.startsWith("ff")
+  );
+}
+
+// IPv4-mapped IPv6 (::ffff:a.b.c.d). WHATWG URL normalizes dotted form to hex pairs (::ffff:7f00:1).
+function ipv4FromMappedIpv6(address: string): string | null {
+  const dotted = /^(?:0{0,4}:){0,5}:?ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(address);
+  if (dotted) return dotted[1] ?? null;
+  const hex = /^(?:0{0,4}:){0,5}:?ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(address);
+  if (!hex) return null;
+  const high = parseInt(hex[1]!, 16);
+  const low = parseInt(hex[2]!, 16);
+  return `${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`;
 }
 

@@ -105,6 +105,10 @@ class UsersController {
            role = COALESCE($3, role),
            status = COALESCE($4, status),
            password_hash = COALESCE($5, password_hash),
+           token_version = token_version + CASE
+             WHEN $5::text IS NOT NULL OR ($3::text IS NOT NULL AND $3::text <> role) OR ($4::text IS NOT NULL AND $4::text <> status) THEN 1
+             ELSE 0
+           END,
            updated_at = now()
        WHERE id = $1
        RETURNING id, name, email, role, status, created_at AS "createdAt", last_login_at AS "lastLoginAt"`,

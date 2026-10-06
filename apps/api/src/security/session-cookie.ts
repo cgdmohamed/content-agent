@@ -5,6 +5,8 @@ export interface SessionUser {
   name: string;
   email: string;
   role: "ADMIN" | "EDITOR";
+  /** Matches users.token_version; bumping it revokes every issued session. */
+  tv: number;
   exp: number;
 }
 
@@ -47,6 +49,8 @@ function isSessionUser(value: Partial<SessionUser>): value is SessionUser {
     typeof value.name === "string" &&
     typeof value.email === "string" &&
     (value.role === "ADMIN" || value.role === "EDITOR") &&
+    typeof value.tv === "number" &&
+    Number.isInteger(value.tv) &&
     typeof value.exp === "number" &&
     Number.isFinite(value.exp)
   );

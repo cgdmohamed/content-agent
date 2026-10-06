@@ -13,7 +13,11 @@
     "secrets:generate": "node scripts/generate-secrets.mjs",
     "legacy:migrate": "node scripts/migrate-legacy.mjs",
     "preflight": "pnpm --filter @content-agent/config build && node scripts/preflight.mjs",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "build:packages": "pnpm --filter @content-agent/types --filter @content-agent/config --filter @content-agent/shared build",
+    "pretypecheck": "pnpm build:packages",
+    "pretest": "pnpm build:packages",
+    "prelint": "pnpm build:packages"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

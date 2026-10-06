@@ -1,5 +1,6 @@
 import { decryptSecret } from "../security/secret-vault.js";
 import { safeExternalUrl } from "../security/url-safety.js";
+import { safeFetch } from "@content-agent/shared/safe-fetch";
 
 export interface InternalSiteCredentials {
   id: string;
@@ -42,7 +43,7 @@ export async function testWordPressConnection(site: InternalSiteCredentials): Pr
   const base = safeWordPressUrl(site.wordpress_url);
   const password = decryptSecret(site.wordpress_application_password_encrypted);
   const endpoint = new URL("/wp-json/wp/v2/users/me", base);
-  const response = await fetch(endpoint, {
+  const response = await safeFetch(endpoint, {
     headers: {
       Authorization: `Basic ${Buffer.from(`${site.wordpress_username}:${password}`).toString("base64")}`,
       Accept: "application/json"
@@ -62,7 +63,7 @@ export async function testRankMathBridge(site: InternalSiteCredentials): Promise
   const base = safeWordPressUrl(site.wordpress_url);
   const password = decryptSecret(site.wordpress_application_password_encrypted);
   const endpoint = new URL("/wp-json/content-agent/v1/rankmath", base);
-  const response = await fetch(endpoint, {
+  const response = await safeFetch(endpoint, {
     headers: {
       Authorization: `Basic ${Buffer.from(`${site.wordpress_username}:${password}`).toString("base64")}`,
       Accept: "application/json"
@@ -85,7 +86,7 @@ export async function updateWordPressPostStatus(site: InternalSiteCredentials, p
   const base = safeWordPressUrl(site.wordpress_url);
   const password = decryptSecret(site.wordpress_application_password_encrypted);
   const endpoint = new URL(`/wp-json/wp/v2/posts/${postId}`, base);
-  const response = await fetch(endpoint, {
+  const response = await safeFetch(endpoint, {
     method: "POST",
     headers: {
       Authorization: `Basic ${Buffer.from(`${site.wordpress_username}:${password}`).toString("base64")}`,
@@ -107,7 +108,7 @@ export async function trashWordPressPost(site: InternalSiteCredentials, postId: 
   const password = decryptSecret(site.wordpress_application_password_encrypted);
   const endpoint = new URL(`/wp-json/wp/v2/posts/${postId}`, base);
   endpoint.searchParams.set("force", "false");
-  const response = await fetch(endpoint, {
+  const response = await safeFetch(endpoint, {
     method: "DELETE",
     headers: {
       Authorization: `Basic ${Buffer.from(`${site.wordpress_username}:${password}`).toString("base64")}`,
@@ -131,7 +132,7 @@ export async function uploadWordPressMedia(
   const base = safeWordPressUrl(site.wordpress_url);
   const password = decryptSecret(site.wordpress_application_password_encrypted);
   const endpoint = new URL("/wp-json/wp/v2/media", base);
-  const response = await fetch(endpoint, {
+  const response = await safeFetch(endpoint, {
     method: "POST",
     headers: {
       Authorization: `Basic ${Buffer.from(`${site.wordpress_username}:${password}`).toString("base64")}`,
@@ -147,7 +148,7 @@ export async function uploadWordPressMedia(
     throw new Error(data.message ?? `فشل رفع الصورة إلى ووردبريس برمز ${response.status}.`);
   }
   if (input.altText?.trim()) {
-    await fetch(new URL(`/wp-json/wp/v2/media/${data.id}`, base), {
+    await safeFetch(new URL(`/wp-json/wp/v2/media/${data.id}`, base), {
       method: "POST",
       headers: {
         Authorization: `Basic ${Buffer.from(`${site.wordpress_username}:${password}`).toString("base64")}`,
@@ -179,7 +180,7 @@ async function fetchWordPressCollection(base: URL, auth: string, endpointName: "
   endpoint.searchParams.set("status", "publish,draft,future");
   endpoint.searchParams.set("orderby", "modified");
   endpoint.searchParams.set("order", "desc");
-  const response = await fetch(endpoint, {
+  const response = await safeFetch(endpoint, {
     headers: { Authorization: auth, Accept: "application/json" },
     signal: AbortSignal.timeout(30_000)
   });

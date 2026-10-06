@@ -1,8 +1,9 @@
 import { Queue, Worker } from "bullmq";
 import { Redis } from "ioredis";
 import { loadEnv } from "@content-agent/config";
-import { closeDb, markJobCompleted, markJobFailed, markJobProvider, markJobStarted, query, setContentFailure } from "./db.js";
+import { closeDb, markJobCompleted, markJobFailed, markJobProvider, markJobRetrying, markJobStarted, query, setContentFailure } from "./db.js";
 import { processContentOperation, providerForOperationResult, syncGscForSite } from "./processors.js";
+import { hasRetriesLeft } from "./retry.js";
 import { nextAutomatedOperation, shouldAutoContinue, type AutomationState } from "./automation.js";
 
 type ContentState =
@@ -127,8 +128,13 @@ for (const queueName of queueNames) {
         await markJobCompleted(bullJobId, Date.now() - startedAt);
       } catch (error) {
         const message = error instanceof Error ? error.message : "خطأ غير معروف";
-        await markJobFailed(bullJobId, message, Date.now() - startedAt);
-        if (contentItemId) await setContentFailure(contentItemId, operation, message);
+        if (hasRetriesLeft(job.attemptsMade, job.opts.attempts)) {
+          // BullMQ will retry this job: keep the content item in its current state instead of showing FAILED.
+          await markJobRetrying(bullJobId, message, Date.now() - startedAt);
+        } else {
+          await markJobFailed(bullJobId, message, Date.now() - startedAt);
+          if (contentItemId) await setContentFailure(contentItemId, operation, message);
+        }
         throw error;
       }
     },
