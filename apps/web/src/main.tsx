@@ -4,6 +4,12 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./ui/AppShell";
 import { LoadingState } from "./ui/StateViews";
+import "@fontsource/alexandria/arabic-400.css";
+import "@fontsource/alexandria/arabic-600.css";
+import "@fontsource/alexandria/arabic-700.css";
+import "@fontsource/alexandria/latin-400.css";
+import "@fontsource/alexandria/latin-600.css";
+import "@fontsource/alexandria/latin-700.css";
 import "./styles.css";
 
 const queryClient = new QueryClient();

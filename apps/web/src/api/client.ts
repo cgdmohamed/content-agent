@@ -4,6 +4,8 @@ import type { ContentMode, IntegrationStatus, UserRole, UserStatus } from "@cont
 const baseUrl = import.meta.env.VITE_API_URL ?? "/api";
 type TextProviderName = Exclude<ProviderName, "gemini-image">;
 
+export const sessionExpiredEvent = "content-agent:session-expired";
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${baseUrl}${path}`, {
     credentials: "include",
@@ -11,7 +13,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init
   });
   if (!response.ok) {
-    if (response.status === 401) throw new Error("يجب تسجيل الدخول أولًا.");
+    if (response.status === 401) {
+      // A 401 on any call except the login/session probes means the session ended mid-work.
+      if (!path.startsWith("/auth/")) window.dispatchEvent(new Event(sessionExpiredEvent));
+      throw new Error("يجب تسجيل الدخول أولًا.");
+    }
+    if (response.status === 413) throw new Error("حجم الطلب أكبر من المسموح. قلّل حجم الملف وحاول مرة أخرى.");
     if (response.status === 403) throw new Error("ليست لديك صلاحية لتنفيذ هذا الإجراء.");
     throw new Error(await readErrorMessage(response));
   }

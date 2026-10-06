@@ -1,11 +1,12 @@
 import { BarChart3, FileText, Globe2, ListChecks, LogIn, LogOut, Settings, ShieldCheck, Users } from "lucide-react";
 import type { ReactElement } from "react";
+import { useEffect, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-import { api } from "../api/client";
+import { api, sessionExpiredEvent } from "../api/client";
 import { IconButton } from "./IconButton";
 import { ActionError, LoadingState } from "./StateViews";
 
@@ -30,6 +31,15 @@ export function AppShell(): ReactElement {
   const queryClient = useQueryClient();
   const location = useLocation();
   const session = useQuery({ queryKey: ["auth", "me"], queryFn: api.me, retry: false });
+  const [sessionExpired, setSessionExpired] = useState(false);
+  useEffect(() => {
+    function onExpired(): void {
+      setSessionExpired(true);
+      queryClient.setQueryData(["auth", "me"], null);
+    }
+    window.addEventListener(sessionExpiredEvent, onExpired);
+    return () => window.removeEventListener(sessionExpiredEvent, onExpired);
+  }, [queryClient]);
   const logout = useMutation({
     mutationFn: api.logout,
     onSuccess: async () => {
@@ -39,7 +49,7 @@ export function AppShell(): ReactElement {
   });
 
   if (session.isLoading) return <main className="min-h-screen bg-mist p-6" dir="rtl"><LoadingState label="جاري التحقق من الجلسة..." /></main>;
-  if (!session.data) return <LoginScreen />;
+  if (!session.data) return <LoginScreen expired={sessionExpired} />;
   const user = session.data;
   if (user.role !== "ADMIN" && isAdminPath(location.pathname)) return <Navigate to="/" replace />;
   const visibleNav = nav.filter((item) => !item.adminOnly || user.role === "ADMIN");
@@ -114,7 +124,7 @@ function isAdminPath(pathname: string): boolean {
   return pathname === "/operations" || pathname === "/users" || pathname === "/settings" || pathname === "/site-audit" || /^\/sites\/[^/]+\/report$/.test(pathname);
 }
 
-function LoginScreen(): ReactElement {
+function LoginScreen(props: { expired?: boolean }): ReactElement {
   const queryClient = useQueryClient();
   const form = useForm<LoginForm>({
     resolver: zodResolver(loginSchema),
@@ -137,6 +147,7 @@ function LoginScreen(): ReactElement {
             <h1 className="mt-1 text-2xl font-bold">تسجيل الدخول</h1>
           </div>
         </div>
+        {props.expired ? <p role="alert" className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">انتهت جلستك. سجّل الدخول من جديد — تعديلاتك غير المحفوظة في المقالات محفوظة محليًا على هذا الجهاز وستعرض عليك للاسترجاع.</p> : null}
         <label className="mt-5 block">
           <span className="text-sm font-medium text-slate-600">البريد الإلكتروني</span>
           <input className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm" type="email" autoComplete="email" {...form.register("email")} />

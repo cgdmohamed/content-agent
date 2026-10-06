@@ -8,6 +8,7 @@ import TiptapTableCell from "@tiptap/extension-table-cell";
 import TiptapTableHeader from "@tiptap/extension-table-header";
 import TiptapTableRow from "@tiptap/extension-table-row";
 import { Bold, Bot, Check, ExternalLink, Heading2, Heading3, Image, Italic, Link2, LinkIcon, List, ListOrdered, LoaderCircle, Network, Pilcrow, Quote, Redo2, RotateCcw, Rows3, Save, SearchCheck, Send, Sparkles, Table2, Undo2, UploadCloud, X } from "lucide-react";
+import { clearLocalDraft, readLocalDraft, saveLocalDraft } from "../draft-storage";
 import { forwardRef, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -41,6 +42,8 @@ export function ArticleWorkspace(): ReactElement {
   const [scheduledAt, setScheduledAt] = useState("");
   const [competitorModalOpen, setCompetitorModalOpen] = useState(false);
   const [imageDragActive, setImageDragActive] = useState(false);
+  const [recoverableDraft, setRecoverableDraft] = useState<string | null>(null);
+  const draftCheckedRef = useRef(false);
   const content = useQuery({ queryKey: ["content", id], queryFn: () => api.contentItem(id), enabled: Boolean(id), refetchInterval: 5000 });
   const selectIdea = useMutation({
     mutationFn: (ideaIndex: number) => api.selectIdea(id, ideaIndex),
@@ -62,6 +65,7 @@ export function ArticleWorkspace(): ReactElement {
         tags: splitArabicList(tagsRef.current?.value ?? "")
       }),
     onSuccess: async () => {
+      clearLocalDraft(id);
       await queryClient.invalidateQueries({ queryKey: ["content", id] });
       await queryClient.invalidateQueries({ queryKey: ["content"] });
     }
@@ -153,6 +157,8 @@ export function ArticleWorkspace(): ReactElement {
     content: "",
     onUpdate: ({ editor }) => {
       editorDirtyRef.current = editor.getHTML() !== loadedDraftRef.current;
+      if (editorDirtyRef.current) saveLocalDraft(id, editor.getHTML());
+      else clearLocalDraft(id);
     },
     editorProps: {
       attributes: { class: "prose max-w-none focus:outline-none min-h-[420px] rtl-editor" }
@@ -168,6 +174,23 @@ export function ArticleWorkspace(): ReactElement {
     loadedDraftRef.current = incomingDraft;
     editorDirtyRef.current = false;
   }, [content.data?.draftHtml, editor]);
+  useEffect(() => {
+    function warnBeforeLeaving(event: BeforeUnloadEvent): void {
+      if (!editorDirtyRef.current) return;
+      event.preventDefault();
+      event.returnValue = "";
+    }
+    window.addEventListener("beforeunload", warnBeforeLeaving);
+    return () => window.removeEventListener("beforeunload", warnBeforeLeaving);
+  }, []);
+  useEffect(() => {
+    // Offer to recover edits that were made locally but never saved (tab closed, session expired, navigation).
+    if (!content.data || !editor || draftCheckedRef.current) return;
+    draftCheckedRef.current = true;
+    const local = readLocalDraft(id);
+    if (local && local.html !== draftContentHtml(content.data.draftHtml) && local.html !== editor.getHTML()) setRecoverableDraft(local.html);
+    else if (local) clearLocalDraft(id);
+  }, [content.data, editor, id]);
   useEffect(() => {
     if (content.data?.scheduledDate) setScheduledAt(isoToDatetimeLocal(content.data.scheduledDate));
   }, [content.data?.scheduledDate]);
@@ -266,6 +289,15 @@ export function ArticleWorkspace(): ReactElement {
           <label className="text-sm font-semibold text-slate-600">العنوان</label>
           <input ref={titleRef} className="mt-2 w-full rounded-md border border-slate-200 px-3 py-2 text-lg font-semibold" defaultValue={content.data.title} dir="rtl" />
           <div className="mt-5 overflow-hidden rounded-md border border-slate-200 bg-white" dir="rtl">
+            {recoverableDraft !== null ? (
+              <div role="alert" className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                <span>وُجدت تعديلات غير محفوظة من جلسة سابقة على هذا الجهاز.</span>
+                <span className="flex gap-2">
+                  <button type="button" className="rounded-md bg-amber-600 px-3 py-1 font-semibold text-white" onClick={() => { editor?.commands.setContent(recoverableDraft); editorDirtyRef.current = true; setRecoverableDraft(null); }}>استرجاع</button>
+                  <button type="button" className="rounded-md border border-amber-300 px-3 py-1 font-semibold" onClick={() => { clearLocalDraft(id); setRecoverableDraft(null); }}>تجاهل</button>
+                </span>
+              </div>
+            ) : null}
             <RichEditorToolbar editor={editor} />
             <div className="p-4">
             <EditorContent editor={editor} />
