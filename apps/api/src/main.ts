@@ -17,7 +17,7 @@ async function bootstrap(): Promise<void> {
   console.info(`تم تحميل إعدادات API. المنفذ: ${env.API_PORT}`);
   const app = await NestFactory.create(AppModule);
   console.info("تم إنشاء تطبيق API.");
-  app.getHttpAdapter().getInstance().set("trust proxy", 1);
+  app.getHttpAdapter().getInstance().set("trust proxy", env.TRUST_PROXY_HOPS);
   app.enableShutdownHooks();
   app.setGlobalPrefix("api");
   app.use(requestIdMiddleware);

@@ -1,4 +1,8 @@
 import { query } from "./db.js";
+import { effectiveHardLimit, estimateCostUsd, estimateTokens, isBudgetExceeded } from "./budget.js";
+import { releaseSpend, reserveSpend, settleSpend } from "./usage.js";
+
+export { effectiveHardLimit, isBudgetExceeded };
 
 export type TextProviderName = "anthropic" | "openai" | "perplexity";
 
@@ -21,11 +25,18 @@ export interface GenerateTextResult {
 
 type ProviderRoutingOperation = "GENERATE_IDEAS" | "RESEARCH_GAPS" | "WRITE_DRAFT" | "REVIEW_DRAFT";
 
+interface ProviderCompletion {
+  text: string;
+  /** Real token usage reported by the provider, when present. */
+  inputTokens?: number;
+  outputTokens?: number;
+}
+
 interface ProviderConfig {
   name: TextProviderName;
   model: string;
   key?: string;
-  generate: (prompt: string, maxTokens: number, key: string, model: string) => Promise<string>;
+  generate: (prompt: string, maxTokens: number, key: string, model: string) => Promise<ProviderCompletion>;
 }
 
 const providers: ProviderConfig[] = [
@@ -50,7 +61,6 @@ const providers: ProviderConfig[] = [
 ];
 
 export async function generateText(input: GenerateTextInput): Promise<GenerateTextResult> {
-  await assertAiBudgetAvailable();
   const preferred = await resolveProviderChain(input.operation, input.preferred ?? ["anthropic", "openai", "perplexity"]);
   const chain = preferred
     .map((name) => providers.find((provider) => provider.name === name))
@@ -61,25 +71,27 @@ export async function generateText(input: GenerateTextInput): Promise<GenerateTe
   const failures: string[] = [];
   for (const provider of chain) {
     const started = Date.now();
+    const maxTokens = input.maxTokens ?? 2500;
+    const promptTokens = estimateTokens(input.prompt);
+    // Throws (and stops the whole chain) when the monthly hard limit is reached.
+    const reservationId = await reserveSpend({
+      provider: provider.name,
+      model: provider.model,
+      operation: input.operation,
+      contentItemId: input.contentItemId,
+      estimatedCostUsd: estimateCostUsd(provider.name, promptTokens, maxTokens)
+    });
     try {
-      const text = await provider.generate(input.prompt, input.maxTokens ?? 2500, provider.key!, provider.model);
+      const completion = await provider.generate(input.prompt, maxTokens, provider.key!, provider.model);
       const durationMs = Date.now() - started;
-      const inputTokens = estimateTokens(input.prompt);
-      const outputTokens = estimateTokens(text);
-      await query(
-        `INSERT INTO api_usage_logs (provider, model, operation, content_item_id, input_tokens, output_tokens, estimated_cost_usd, duration_ms, success)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)`,
-        [provider.name, provider.model, input.operation, input.contentItemId, inputTokens, outputTokens, estimateCost(provider.name, inputTokens, outputTokens), durationMs]
-      );
-      return { provider: provider.name, model: provider.model, text, inputTokens, outputTokens, durationMs };
+      const inputTokens = completion.inputTokens ?? promptTokens;
+      const outputTokens = completion.outputTokens ?? estimateTokens(completion.text);
+      await settleSpend(reservationId, { inputTokens, outputTokens, costUsd: estimateCostUsd(provider.name, inputTokens, outputTokens), durationMs });
+      return { provider: provider.name, model: provider.model, text: completion.text, inputTokens, outputTokens, durationMs };
     } catch (error) {
       const message = error instanceof Error ? error.message : "خطأ غير معروف";
       failures.push(`${provider.name}: ${message}`);
-      await query(
-        `INSERT INTO api_usage_logs (provider, model, operation, content_item_id, duration_ms, success, error)
-         VALUES ($1, $2, $3, $4, $5, false, $6)`,
-        [provider.name, provider.model, input.operation, input.contentItemId, Date.now() - started, message]
-      );
+      await releaseSpend(reservationId, { durationMs: Date.now() - started, error: message });
     }
   }
 
@@ -112,32 +124,7 @@ function providerRoutingKey(operation: string): keyof Record<"ideas" | "research
   return map[operation as ProviderRoutingOperation] ?? null;
 }
 
-async function assertAiBudgetAvailable(): Promise<void> {
-  const spend = await query<{ total: string }>(
-    "SELECT COALESCE(SUM(estimated_cost_usd), 0)::text AS total FROM api_usage_logs WHERE created_at >= date_trunc('month', now())"
-  );
-  const settings = await query<{ value: { monthlyAiBudgetUsd?: number; monthlyAiHardLimitUsd?: number } }>(
-    "SELECT value FROM system_settings WHERE key = 'production_settings'"
-  );
-  const hardLimit = effectiveHardLimit(
-    settings.rows[0]?.value.monthlyAiBudgetUsd ?? Number(process.env.MONTHLY_AI_BUDGET_USD ?? 30),
-    settings.rows[0]?.value.monthlyAiHardLimitUsd ?? Number(process.env.MONTHLY_AI_HARD_LIMIT_USD ?? 40)
-  );
-  if (isBudgetExceeded(Number(spend.rows[0]?.total ?? 0), hardLimit)) {
-    throw new Error("تم تجاوز حد ميزانية الذكاء الاصطناعي الصارم لهذا الشهر.");
-  }
-}
-
-export function effectiveHardLimit(monthlyBudget: number, hardLimit: number): number {
-  if (hardLimit <= 0) return 0;
-  return Math.max(monthlyBudget, hardLimit);
-}
-
-export function isBudgetExceeded(monthlySpend: number, hardLimit: number): boolean {
-  return hardLimit > 0 && monthlySpend >= hardLimit;
-}
-
-async function callOpenAI(prompt: string, maxTokens: number, key: string, model: string): Promise<string> {
+async function callOpenAI(prompt: string, maxTokens: number, key: string, model: string): Promise<ProviderCompletion> {
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
@@ -149,12 +136,16 @@ async function callOpenAI(prompt: string, maxTokens: number, key: string, model:
     }),
     signal: AbortSignal.timeout(120_000)
   });
-  const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } };
+  const data = (await response.json()) as ChatCompletionResponse;
   if (!response.ok) throw new Error(`فشل اتصال OpenAI برمز ${response.status}.`);
-  return data.choices?.[0]?.message?.content ?? "";
+  return {
+    text: data.choices?.[0]?.message?.content ?? "",
+    inputTokens: data.usage?.prompt_tokens,
+    outputTokens: data.usage?.completion_tokens
+  };
 }
 
-async function callPerplexity(prompt: string, maxTokens: number, key: string, model: string): Promise<string> {
+async function callPerplexity(prompt: string, maxTokens: number, key: string, model: string): Promise<ProviderCompletion> {
   const response = await fetch("https://api.perplexity.ai/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
@@ -166,12 +157,16 @@ async function callPerplexity(prompt: string, maxTokens: number, key: string, mo
     }),
     signal: AbortSignal.timeout(120_000)
   });
-  const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } };
+  const data = (await response.json()) as ChatCompletionResponse;
   if (!response.ok) throw new Error(`فشل اتصال Perplexity برمز ${response.status}.`);
-  return data.choices?.[0]?.message?.content ?? "";
+  return {
+    text: data.choices?.[0]?.message?.content ?? "",
+    inputTokens: data.usage?.prompt_tokens,
+    outputTokens: data.usage?.completion_tokens
+  };
 }
 
-async function callAnthropic(prompt: string, maxTokens: number, key: string, model: string): Promise<string> {
+async function callAnthropic(prompt: string, maxTokens: number, key: string, model: string): Promise<ProviderCompletion> {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -187,21 +182,17 @@ async function callAnthropic(prompt: string, maxTokens: number, key: string, mod
     }),
     signal: AbortSignal.timeout(120_000)
   });
-  const data = (await response.json()) as { content?: Array<{ type: string; text?: string }>; error?: { message?: string } };
+  const data = (await response.json()) as { content?: Array<{ type: string; text?: string }>; usage?: { input_tokens?: number; output_tokens?: number }; error?: { message?: string } };
   if (!response.ok) throw new Error(`فشل اتصال Anthropic برمز ${response.status}.`);
-  return data.content?.map((item) => item.text ?? "").join("\n") ?? "";
-}
-
-function estimateTokens(text: string): number {
-  return Math.max(1, Math.ceil(text.length / 4));
-}
-
-function estimateCost(provider: TextProviderName, inputTokens: number, outputTokens: number): number {
-  const rates: Record<TextProviderName, { input: number; output: number }> = {
-    anthropic: { input: 3, output: 15 },
-    openai: { input: 0.15, output: 0.6 },
-    perplexity: { input: 1, output: 1 }
+  return {
+    text: data.content?.map((item) => item.text ?? "").join("\n") ?? "",
+    inputTokens: data.usage?.input_tokens,
+    outputTokens: data.usage?.output_tokens
   };
-  const rate = rates[provider];
-  return Number(((inputTokens / 1_000_000) * rate.input + (outputTokens / 1_000_000) * rate.output).toFixed(6));
+}
+
+interface ChatCompletionResponse {
+  choices?: Array<{ message?: { content?: string } }>;
+  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  error?: { message?: string };
 }

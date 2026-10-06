@@ -47,8 +47,11 @@ export async function publishPost(site: WordPressSite, input: WordPressPostInput
   const auth = authHeader(site);
   const categoryIds = input.category ? [await getOrCreateTerm(base, auth, "categories", input.category)] : [];
   const tagIds = await Promise.all(input.tags.map((tag) => getOrCreateTerm(base, auth, "tags", tag)));
-  const endpoint = input.wordpressPostId
-    ? new URL(`/wp-json/wp/v2/posts/${input.wordpressPostId}`, base)
+  // A previous attempt may have created the post before the database update was saved; adopt it
+  // instead of creating a duplicate when the same slug and title already exist.
+  const existingPostId = input.wordpressPostId ?? (await findExistingPostId(base, auth, input.slug, input.title));
+  const endpoint = existingPostId
+    ? new URL(`/wp-json/wp/v2/posts/${existingPostId}`, base)
     : new URL("/wp-json/wp/v2/posts", base);
   const statusAndDate = postStatus(input);
   const contentHtml = sanitizeArticleHtml(input.contentHtml);
@@ -84,6 +87,37 @@ export async function publishPost(site: WordPressSite, input: WordPressPostInput
     status: data.status ?? statusAndDate.status,
     date: data.date
   };
+}
+
+export interface WordPressPostLookupRow {
+  id?: number;
+  title?: { raw?: string; rendered?: string };
+}
+
+export function matchExistingPost(rows: unknown, title: string): string | null {
+  if (!Array.isArray(rows)) return null;
+  const wanted = title.trim();
+  const match = (rows as WordPressPostLookupRow[]).find((row) => {
+    const candidate = (row.title?.raw ?? row.title?.rendered ?? "").trim();
+    return typeof row.id === "number" && candidate === wanted;
+  });
+  return match?.id !== undefined ? String(match.id) : null;
+}
+
+async function findExistingPostId(base: URL, auth: string, slug: string | null | undefined, title: string): Promise<string | null> {
+  const trimmed = slug?.trim();
+  if (!trimmed) return null;
+  const endpoint = new URL("/wp-json/wp/v2/posts", base);
+  endpoint.searchParams.set("slug", trimmed);
+  endpoint.searchParams.set("status", "any");
+  endpoint.searchParams.set("context", "edit");
+  endpoint.searchParams.set("per_page", "5");
+  const response = await safeFetch(endpoint, {
+    headers: { Authorization: auth, Accept: "application/json" },
+    signal: AbortSignal.timeout(30_000)
+  });
+  if (!response.ok) return null;
+  return matchExistingPost(await response.json().catch(() => null), title);
 }
 
 export async function uploadMedia(site: WordPressSite, input: { bytes: Buffer; mimeType: string; filename: string; altText?: string | null }): Promise<WordPressMediaResult> {

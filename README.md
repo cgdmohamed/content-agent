@@ -58,6 +58,8 @@ Role rules currently enforced server-side:
 - `EDITOR`: create content, generate ideas, research, write, review, edit article content, generate or skip images.
 
 Frontend checks are only convenience; backend guards are the source of truth.
+Failed-login limits are stored in Redis (shared across API instances and restarts, falling back to memory if Redis is down). Set `TRUST_PROXY_HOPS` to the number of reverse proxies in front of the API (default 2 for Coolify/Traefik + the web container's nginx) so the limiter sees real client IPs.
+Before creating a WordPress post, the worker looks for an existing post with the same slug and title and updates it instead, so a retry after a partial failure does not duplicate the article.
 Unsafe authenticated writes also verify the request origin against `PUBLIC_WEB_URL`, which protects cookie-based sessions from cross-site write attempts.
 Outbound requests to user-configured WordPress sites go through `safeFetch` (`@content-agent/shared/safe-fetch`): the hostname must resolve only to public addresses, redirects are followed manually with every hop re-validated, and credentials are dropped on cross-origin redirects.
 Generated and manually edited article HTML is sanitized with an allowlist before storage or WordPress publishing. Executable tags, event handlers, iframes, protocol-relative URLs, and `javascript:` links are stripped.
@@ -247,6 +249,7 @@ Implemented worker processors:
 - `SYNC_GSC` for Search Console query snapshots
 
 Text generation supports fallback across configured Anthropic, OpenAI, and Perplexity keys and records usage in `api_usage_logs`.
+Every provider call (text and Gemini images) first reserves its expected cost under a PostgreSQL advisory lock that also checks the monthly hard limit, so concurrent jobs cannot overshoot it; the reservation is then settled with the provider-reported token usage (or zeroed when the call fails). Rates default to built-in per-provider prices and can be overridden with `AI_PRICE_<PROVIDER>_INPUT_PER_M` / `AI_PRICE_<PROVIDER>_OUTPUT_PER_M` (USD per 1M tokens); image cost uses `GEMINI_IMAGE_COST_USD` (default 0.04).
 The worker checks the monthly hard AI budget before provider calls and stops text generation once the configured limit is reached. Set `MONTHLY_AI_HARD_LIMIT_USD=0` only when you intentionally want to disable the hard stop.
 WordPress publishing creates categories/tags when needed and sends Rank Math metadata through the post `meta` payload when the bridge allows those fields.
 Google Search Console supports service-account connection testing, queued synchronization, query snapshot storage, dashboard opportunity discovery, and site report opportunities.

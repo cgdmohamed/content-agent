@@ -1,5 +1,7 @@
 import { appendAudit, query } from "./db.js";
 import { generateText } from "./ai.js";
+import { imageCostUsd } from "./budget.js";
+import { releaseSpend, reserveSpend, settleSpend } from "./usage.js";
 import { sanitizeArticleHtml } from "./html-sanitizer.js";
 import { asStringArray, extractJson } from "./json.js";
 import { scoreArticle } from "./scoring.js";
@@ -187,7 +189,18 @@ async function generateFeaturedImage(contentItemId: string): Promise<OperationRe
   const item = await fetchContent(contentItemId);
   if (!item.title) throw new Error("لا يمكن توليد صورة بدون عنوان المقال.");
   const prompt = item.image_prompt?.trim() || `Editorial blog feature image for: ${item.title}`;
-  const generated = await generateGeminiImage(prompt);
+  const imageModel = process.env.GEMINI_IMAGE_MODEL ?? "gemini-3.1-flash-image";
+  const costUsd = imageCostUsd();
+  const reservationId = await reserveSpend({ provider: "gemini-image", model: imageModel, operation: "GENERATE_IMAGE", contentItemId, estimatedCostUsd: costUsd });
+  const imageStarted = Date.now();
+  let generated: Awaited<ReturnType<typeof generateGeminiImage>>;
+  try {
+    generated = await generateGeminiImage(prompt);
+  } catch (error) {
+    await releaseSpend(reservationId, { durationMs: Date.now() - imageStarted, error: error instanceof Error ? error.message : "خطأ غير معروف" });
+    throw error;
+  }
+  await settleSpend(reservationId, { inputTokens: 0, outputTokens: 0, costUsd, durationMs: Date.now() - imageStarted });
   const extension = generated.mimeType.includes("jpeg") || generated.mimeType.includes("jpg") ? "jpg" : "png";
   const media = await uploadMedia(
     {

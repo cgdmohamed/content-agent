@@ -28,7 +28,9 @@ export const envSchema = z.object({
   GEMINI_IMAGE_MODEL: z.string().optional(),
   BOOTSTRAP_ADMIN_EMAIL: z.string().email().optional(),
   BOOTSTRAP_ADMIN_PASSWORD: z.string().min(8).optional(),
-  WORKER_CONCURRENCY: z.coerce.number().int().positive().default(2)
+  WORKER_CONCURRENCY: z.coerce.number().int().positive().default(2),
+  /** Reverse proxies in front of the API (Coolify/Traefik + the web container's nginx = 2). */
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(2)
 }).superRefine((value, context) => {
   if (value.MONTHLY_AI_HARD_LIMIT_USD > 0 && value.MONTHLY_AI_HARD_LIMIT_USD < value.MONTHLY_AI_BUDGET_USD) {
     context.addIssue({

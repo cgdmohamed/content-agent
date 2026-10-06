@@ -5,7 +5,8 @@ import type { CookieOptions, Request, Response } from "express";
 import { AuditService } from "../audit/audit.module.js";
 import { DatabaseService } from "../database/database.module.js";
 import { Public, resolveActiveSessionUser } from "../security/access-control.js";
-import { LoginRateLimiter } from "../security/login-rate-limit.js";
+import { JobQueueService } from "../queue/job-queue.module.js";
+import { DistributedLoginRateLimiter } from "../security/login-rate-limit.js";
 import { fieldLimits } from "../security/payload-limits.js";
 import { passwordPolicyIssues, strongPasswordMessage } from "../security/password-policy.js";
 import { createSessionCookie, parseSessionCookie, type SessionUser } from "../security/session-cookie.js";
@@ -35,14 +36,18 @@ type CookieRequest = Request & { cookies?: Record<string, string | undefined> };
 
 const SESSION_COOKIE_NAME = "content_agent_session";
 const SESSION_COOKIE_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7;
-const loginRateLimiter = new LoginRateLimiter();
 
 @Injectable()
 class AuthService implements OnModuleInit {
+  private readonly loginRateLimiter: DistributedLoginRateLimiter;
+
   constructor(
     private readonly db: DatabaseService,
-    private readonly audit: AuditService
-  ) {}
+    private readonly audit: AuditService,
+    queue: JobQueueService
+  ) {
+    this.loginRateLimiter = new DistributedLoginRateLimiter(queue.redis);
+  }
 
   async onModuleInit(): Promise<void> {
     await this.bootstrapAdmin();
@@ -64,24 +69,24 @@ class AuthService implements OnModuleInit {
   }
 
   async login(email: string, password: string, ip: string): Promise<Omit<SessionUser, "exp">> {
-    this.assertLoginAllowed(email, ip);
+    await this.assertLoginAllowed(email, ip);
     const result = await this.db.query<UserRow>(
       "SELECT id, name, email, password_hash, role, status, token_version FROM users WHERE lower(email) = lower($1)",
       [email]
     );
     const user = result.rows[0];
     if (!user || user.status !== "ACTIVE") {
-      this.recordFailedLogin(email, ip);
+      await this.recordFailedLogin(email, ip);
       await this.recordLoginFailed(email);
       throw new UnauthorizedException("بيانات الدخول غير صحيحة");
     }
     const ok = await bcrypt.compare(password, user.password_hash);
     if (!ok) {
-      this.recordFailedLogin(email, ip);
+      await this.recordFailedLogin(email, ip);
       await this.recordLoginFailed(email);
       throw new UnauthorizedException("بيانات الدخول غير صحيحة");
     }
-    loginRateLimiter.clear({ email, ip });
+    await this.loginRateLimiter.clear({ email, ip });
     await this.db.query("UPDATE users SET last_login_at = now(), updated_at = now() WHERE id = $1", [user.id]);
     await this.audit.record({
       actorUserId: user.id,
@@ -125,16 +130,16 @@ class AuthService implements OnModuleInit {
     });
   }
 
-  private assertLoginAllowed(email: string, ip: string): void {
+  private async assertLoginAllowed(email: string, ip: string): Promise<void> {
     try {
-      loginRateLimiter.assertAllowed({ email, ip });
+      await this.loginRateLimiter.assertAllowed({ email, ip });
     } catch {
       throw new HttpException("محاولات دخول كثيرة. حاول مرة أخرى بعد قليل.", HttpStatus.TOO_MANY_REQUESTS);
     }
   }
 
-  private recordFailedLogin(email: string, ip: string): void {
-    loginRateLimiter.recordFailure({ email, ip });
+  private async recordFailedLogin(email: string, ip: string): Promise<void> {
+    await this.loginRateLimiter.recordFailure({ email, ip });
   }
 
   private loginKey(email: string): string {

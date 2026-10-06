@@ -14,6 +14,23 @@ export function query<T extends QueryResultRow = QueryResultRow>(text: string, v
   return getPool().query<T>(text, values);
 }
 
+export type TransactionQuery = <R extends QueryResultRow = QueryResultRow>(text: string, values?: unknown[]) => Promise<QueryResult<R>>;
+
+export async function withTransaction<T>(work: (run: TransactionQuery) => Promise<T>): Promise<T> {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const result = await work(<R extends QueryResultRow = QueryResultRow>(text: string, values: unknown[] = []) => client.query<R>(text, values));
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function closeDb(): Promise<void> {
   await pool?.end();
   pool = null;

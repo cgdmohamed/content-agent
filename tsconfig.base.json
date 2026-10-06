@@ -17,6 +17,7 @@
     "paths": {
       "@content-agent/shared": ["./packages/shared/src/index.ts"],
       "@content-agent/shared/safe-fetch": ["./packages/shared/src/safe-fetch.ts"],
+      "@content-agent/shared/secrets": ["./packages/shared/src/secrets.ts"],
       "@content-agent/types": ["./packages/types/src/index.ts"],
       "@content-agent/config": ["./packages/config/src/index.ts"]
     }

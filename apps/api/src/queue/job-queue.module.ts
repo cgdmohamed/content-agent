@@ -7,6 +7,11 @@ export class JobQueueService implements OnModuleDestroy {
   private readonly connection = new Redis(loadEnv().REDIS_URL, {
     maxRetriesPerRequest: null
   });
+
+  /** Shared Redis connection for lightweight coordination such as login rate limiting. */
+  get redis(): Redis {
+    return this.connection;
+  }
   private readonly queues = new Map<string, Queue>();
 
   async onModuleDestroy(): Promise<void> {

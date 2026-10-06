@@ -13,3 +13,13 @@ describe("hasRetriesLeft", () => {
     expect(hasRetriesLeft(0, 1)).toBe(false);
   });
 });
+
+describe("matchExistingPost", () => {
+  it("adopts a post with the same title and ignores unrelated slug collisions", async () => {
+    const { matchExistingPost } = await import("../wordpress.js");
+    expect(matchExistingPost([{ id: 7, title: { raw: " عنوان المقال " } }], "عنوان المقال")).toBe("7");
+    expect(matchExistingPost([{ id: 8, title: { rendered: "مقال آخر" } }], "عنوان المقال")).toBeNull();
+    expect(matchExistingPost({ message: "error" }, "عنوان المقال")).toBeNull();
+    expect(matchExistingPost([], "عنوان المقال")).toBeNull();
+  });
+});
