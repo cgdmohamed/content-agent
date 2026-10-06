@@ -20,6 +20,7 @@ export function Sites(): ReactElement {
   const [editingSite, setEditingSite] = useState<SiteDto | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SiteDto | null>(null);
   const createSite = useMutation({
+    meta: { successMessage: "تمت إضافة الموقع" },
     mutationFn: api.createSite,
     onSuccess: async () => {
       setFormOpen(false);
@@ -28,18 +29,22 @@ export function Sites(): ReactElement {
     }
   });
   const testWp = useMutation({
+    meta: { successMessage: "اكتمل اختبار ووردبريس" },
     mutationFn: api.testWordPress,
     onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["sites"] })
   });
   const testRankMath = useMutation({
+    meta: { successMessage: "اكتمل اختبار رانك ماث" },
     mutationFn: api.testRankMath,
     onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["sites"] })
   });
   const testGsc = useMutation({
+    meta: { successMessage: "اكتمل اختبار بحث جوجل" },
     mutationFn: api.testGsc,
     onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["sites"] })
   });
   const syncGsc = useMutation({
+    meta: { successMessage: "بدأت مزامنة بحث جوجل" },
     mutationFn: api.syncGsc,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["jobs"] });
@@ -47,6 +52,7 @@ export function Sites(): ReactElement {
     }
   });
   const updateSite = useMutation({
+    meta: { successMessage: "تم حفظ تعديلات الموقع" },
     mutationFn: ({ id, body }: { id: string; body: Parameters<typeof api.updateSite>[1] }) => api.updateSite(id, body),
     onSuccess: async () => {
       setEditingSite(null);
@@ -55,6 +61,7 @@ export function Sites(): ReactElement {
     }
   });
   const deleteSite = useMutation({
+    meta: { successMessage: "تم حذف الموقع" },
     mutationFn: api.deleteSite,
     onSuccess: async () => {
       setDeleteTarget(null);

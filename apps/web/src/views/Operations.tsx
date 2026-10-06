@@ -12,10 +12,12 @@ export function Operations(): ReactElement {
   const jobs = useQuery({ queryKey: ["jobs"], queryFn: api.jobs, refetchInterval: 5000 });
   const audit = useQuery({ queryKey: ["audit"], queryFn: api.audit, refetchInterval: 15000 });
   const retryJob = useMutation({
+    meta: { successMessage: "تمت إعادة المحاولة" },
     mutationFn: api.retryJob,
     onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["jobs"] })
   });
   const cancelJob = useMutation({
+    meta: { successMessage: "تم إلغاء المهمة" },
     mutationFn: api.cancelJob,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["jobs"] });

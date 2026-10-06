@@ -5,6 +5,7 @@ import { DatabaseModule } from "../database/database.module.js";
 import { JobQueueModule } from "../queue/job-queue.module.js";
 import { SessionGuard } from "../security/access-control.js";
 import { AuthModule } from "./auth.module.js";
+import { ClientErrorsModule } from "./client-errors.module.js";
 import { ContentModule } from "./content.module.js";
 import { DashboardModule } from "./dashboard.module.js";
 import { HealthModule } from "./health.module.js";
@@ -15,7 +16,7 @@ import { SitesModule } from "./sites.module.js";
 import { UsersModule } from "./users.module.js";
 
 @Module({
-  imports: [DatabaseModule, AuditModule, JobQueueModule, AuthModule, SitesModule, ContentModule, DashboardModule, JobsModule, ReportsModule, SettingsModule, UsersModule, HealthModule],
+  imports: [DatabaseModule, AuditModule, JobQueueModule, AuthModule, SitesModule, ContentModule, DashboardModule, JobsModule, ReportsModule, SettingsModule, UsersModule, HealthModule, ClientErrorsModule],
   providers: [{ provide: APP_GUARD, useClass: SessionGuard }]
 })
 export class AppModule {}

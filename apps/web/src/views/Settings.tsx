@@ -12,6 +12,7 @@ export function Settings(): ReactElement {
   const [customModels, setCustomModels] = useState<ModelSpecDto[] | null>(null);
   const [draft, setDraft] = useState({ provider: "openai", kind: "text", model: "", label: "", inputPerM: "", outputPerM: "", imageUsd: "", imageOutputPerM: "" });
   const updateSettings = useMutation({
+    meta: { successMessage: "تم حفظ الإعدادات" },
     mutationFn: api.updateSettings,
     onSuccess: async () => {
       setSaved(true);

@@ -10,6 +10,7 @@ export function Users(): ReactElement {
   const [passwordUser, setPasswordUser] = useState<UserDto | null>(null);
   const users = useQuery({ queryKey: ["users"], queryFn: api.users });
   const createUser = useMutation({
+    meta: { successMessage: "تم إنشاء المستخدم" },
     mutationFn: api.createUser,
     onSuccess: async () => {
       setFormOpen(false);
@@ -17,6 +18,7 @@ export function Users(): ReactElement {
     }
   });
   const updateUser = useMutation({
+    meta: { successMessage: "تم تحديث المستخدم" },
     mutationFn: ({ id, body }: { id: string; body: Parameters<typeof api.updateUser>[1] }) => api.updateUser(id, body),
     onSuccess: async () => {
       setPasswordUser(null);

@@ -47,6 +47,7 @@ export function ContentLibrary(): ReactElement {
   const sites = useQuery({ queryKey: ["sites"], queryFn: api.sites });
   const defaults = useQuery({ queryKey: ["content-defaults"], queryFn: api.contentDefaults });
   const createContent = useMutation({
+    meta: { successMessage: "تم إنشاء المحتوى" },
     mutationFn: api.createContent,
     onSuccess: async () => {
       setFormOpen(false);
@@ -55,6 +56,7 @@ export function ContentLibrary(): ReactElement {
     }
   });
   const createBulkContent = useMutation({
+    meta: { successMessage: "تم إنشاء الدفعة" },
     mutationFn: api.createBulkContent,
     onSuccess: async () => {
       setFormOpen(false);
@@ -65,6 +67,7 @@ export function ContentLibrary(): ReactElement {
     }
   });
   const runOperation = useMutation<unknown, Error, { id: string; operation: ContentOperation }>({
+    meta: { successMessage: "تمت إضافة المهمة إلى الطابور" },
     mutationFn: ({ id, operation }: { id: string; operation: ContentOperation }) => {
       if (operation === "APPROVE") return api.approveContent(id);
       if (operation === "RETRY") return api.retryContent(id);
@@ -77,6 +80,7 @@ export function ContentLibrary(): ReactElement {
     }
   });
   const deleteContent = useMutation({
+    meta: { successMessage: "تم حذف المحتوى" },
     mutationFn: api.deleteContent,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["content"] });
@@ -85,6 +89,7 @@ export function ContentLibrary(): ReactElement {
     }
   });
   const cleanupContent = useMutation({
+    meta: { successMessage: "تم حذف العناصر المحددة" },
     mutationFn: api.cleanupContent,
     onSuccess: async () => {
       setSelectedIds([]);
@@ -95,6 +100,7 @@ export function ContentLibrary(): ReactElement {
     }
   });
   const rollbackPublishing = useMutation({
+    meta: { successMessage: "تم سحب النشر للعناصر المحددة" },
     mutationFn: api.rollbackContentPublishing,
     onSuccess: async () => {
       setSelectedIds([]);
@@ -105,6 +111,7 @@ export function ContentLibrary(): ReactElement {
     }
   });
   const duplicateContent = useMutation({
+    meta: { successMessage: "تم نسخ المحتوى" },
     mutationFn: api.duplicateContent,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["content"] });

@@ -225,6 +225,10 @@ First deployment procedure:
 
 For a short launch checklist, see `PRODUCTION_CHECKLIST.md`.
 
+### Web feedback and crash handling
+
+Every mutation shows a toast on success (via `meta.successMessage` on the mutation) and on failure (global `MutationCache` handler; the login form opts out with `meta.silent`). React render crashes are caught by an Error Boundary: one per route, so navigation keeps working and moving to another route clears it, plus a page-level fallback. Crashes, `window.onerror` and unhandled promise rejections are posted to `POST /api/client-errors` (authenticated, length-limited, at most 5 per page load) and written to the API log as one JSON line with the user id and request id, so they can be found next to server errors.
+
 ### Operations Runbook
 
 - Use the Operations page for failed, waiting, delayed, completed, and cancelled jobs. Failed content jobs can be retried; waiting or delayed jobs can be cancelled before execution.

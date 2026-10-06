@@ -131,6 +131,7 @@ function LoginScreen(props: { expired?: boolean }): ReactElement {
     defaultValues: { email: "", password: "" }
   });
   const login = useMutation({
+    meta: { silent: true },
     mutationFn: api.login,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["auth", "me"] });

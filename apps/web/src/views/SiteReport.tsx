@@ -17,6 +17,7 @@ export function SiteReport(): ReactElement {
   const report = useQuery({ queryKey: ["site-report", id, from, to], queryFn: () => api.siteReport(id, { from, to }), enabled: Boolean(id) });
   const audit = useQuery({ queryKey: ["site-audit", id], queryFn: () => api.siteAudit(id), enabled: Boolean(id), staleTime: 60_000 });
   const optimize = useMutation({
+    meta: { successMessage: "تمت إضافة التحسين إلى الطابور" },
     mutationFn: (contentItemId: string) => api.optimizeContentLinks(contentItemId),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["site-audit", id] });

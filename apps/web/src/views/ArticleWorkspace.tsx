@@ -46,6 +46,7 @@ export function ArticleWorkspace(): ReactElement {
   const draftCheckedRef = useRef(false);
   const content = useQuery({ queryKey: ["content", id], queryFn: () => api.contentItem(id), enabled: Boolean(id), refetchInterval: 5000 });
   const selectIdea = useMutation({
+    meta: { successMessage: "تم اختيار الفكرة" },
     mutationFn: (ideaIndex: number) => api.selectIdea(id, ideaIndex),
     onSuccess: async (updated) => {
       loadedDraftRef.current = draftContentHtml(updated.draftHtml);
@@ -55,6 +56,7 @@ export function ArticleWorkspace(): ReactElement {
     }
   });
   const saveArticle = useMutation({
+    meta: { successMessage: "تم حفظ المقال" },
     mutationFn: () =>
       api.updateContent(id, {
         title: titleRef.current?.value,
@@ -71,6 +73,7 @@ export function ArticleWorkspace(): ReactElement {
     }
   });
   const restoreVersion = useMutation({
+    meta: { successMessage: "تمت استعادة النسخة" },
     mutationFn: (versionId: string) => api.restoreContentVersion(id, versionId),
     onSuccess: async (updated) => {
       loadedDraftRef.current = draftContentHtml(updated.draftHtml);
@@ -81,6 +84,7 @@ export function ArticleWorkspace(): ReactElement {
     }
   });
   const skipImage = useMutation({
+    meta: { successMessage: "تم تخطي الصورة" },
     mutationFn: () => api.skipImage(id),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["content", id] });
@@ -88,6 +92,7 @@ export function ArticleWorkspace(): ReactElement {
     }
   });
   const generateImage = useMutation({
+    meta: { successMessage: "تمت إضافة توليد الصورة إلى الطابور" },
     mutationFn: () => api.runContentOperation(id, "generate-image"),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["jobs"] });
@@ -95,6 +100,7 @@ export function ArticleWorkspace(): ReactElement {
     }
   });
   const uploadImage = useMutation({
+    meta: { successMessage: "تم رفع الصورة" },
     mutationFn: async (file: File) => {
       validateManualImageFile(file);
       const imageBase64 = await fileToBase64(file);
@@ -112,6 +118,7 @@ export function ArticleWorkspace(): ReactElement {
     }
   });
   const optimizeLinks = useMutation({
+    meta: { successMessage: "تمت إضافة تحسين الروابط إلى الطابور" },
     mutationFn: () => api.optimizeContentLinks(id),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["jobs"] });
@@ -121,6 +128,7 @@ export function ArticleWorkspace(): ReactElement {
     }
   });
   const scheduleArticle = useMutation({
+    meta: { successMessage: "تمت جدولة المقال" },
     mutationFn: () => api.scheduleContent(id, datetimeLocalToIso(scheduledAt)),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["content", id] });
@@ -130,6 +138,7 @@ export function ArticleWorkspace(): ReactElement {
     }
   });
   const runPrimary = useMutation({
+    meta: { successMessage: "تمت إضافة المهمة إلى الطابور" },
     mutationFn: (operation: ContentOperation) => runArticleOperation(id, operation),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["jobs"] });
