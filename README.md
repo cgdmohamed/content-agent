@@ -249,6 +249,11 @@ Implemented worker processors:
 - `SYNC_GSC` for Search Console query snapshots
 
 Text generation supports fallback across configured Anthropic, OpenAI, and Perplexity keys and records usage in `api_usage_logs`.
+
+### Model selection
+
+Admins choose the model for every operation (ideas, competitor research, drafting, review, internal links, featured image) from Settings, each with a primary model and a fallback. Resolution order per call: the site's own override (Sites → edit) → the system setting → the legacy provider order with the `*_MODEL` environment variables. A site can also restrict itself to an allow-list of models; models outside it are never called for that site, and a call fails with a clear message if nothing allowed is configured.
+The catalog lives in `packages/shared/src/models.ts` (with list prices) and Admins can add models or correct prices from Settings ("موديلات مخصصة وأسعارها"); budget accounting uses those prices. Prices marked "تقديري" are assumptions—verify them against your provider bill. Image cost is computed from the token usage Gemini reports when the model has a token price, otherwise from the flat per-image price. Settings also expose the image size (1K/2K/4K); a larger size costs more. A generated image whose WordPress upload fails is kept in memory for 30 minutes so the retry does not pay for a second image.
 Every provider call (text and Gemini images) first reserves its expected cost under a PostgreSQL advisory lock that also checks the monthly hard limit, so concurrent jobs cannot overshoot it; the reservation is then settled with the provider-reported token usage (or zeroed when the call fails). Rates default to built-in per-provider prices and can be overridden with `AI_PRICE_<PROVIDER>_INPUT_PER_M` / `AI_PRICE_<PROVIDER>_OUTPUT_PER_M` (USD per 1M tokens); image cost uses `GEMINI_IMAGE_COST_USD` (default 0.04).
 The worker checks the monthly hard AI budget before provider calls and stops text generation once the configured limit is reached. Set `MONTHLY_AI_HARD_LIMIT_USD=0` only when you intentionally want to disable the hard stop.
 WordPress publishing creates categories/tags when needed and sends Rank Math metadata through the post `meta` payload when the bridge allows those fields.

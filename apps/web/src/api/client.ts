@@ -36,6 +36,33 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "حدث خطأ غير متوقع.";
 }
 
+export type ModelOperationKey = "ideas" | "research" | "writing" | "review" | "links" | "image";
+
+export interface ModelRefDto {
+  provider: "anthropic" | "openai" | "perplexity" | "gemini";
+  model: string;
+}
+
+export interface ModelSpecDto extends ModelRefDto {
+  label: string;
+  kind: "text" | "image";
+  inputPerM?: number;
+  outputPerM?: number;
+  imageUsd?: number;
+  imageOutputPerM?: number;
+  custom?: boolean;
+  estimated?: boolean;
+  providerConfigured: boolean;
+}
+
+export interface ModelOperationDto {
+  key: ModelOperationKey;
+  label: string;
+  kind: "text" | "image";
+}
+
+export type OperationModelsDto = Partial<Record<ModelOperationKey, ModelRefDto[]>>;
+
 export interface SiteDto {
   id: string;
   name: string;
@@ -45,6 +72,8 @@ export interface SiteDto {
   language: string;
   writingStandard?: string | null;
   gscProperty?: string | null;
+  allowedModels?: string[];
+  operationModels?: OperationModelsDto;
   status: "ACTIVE" | "DISABLED";
   wordpressStatus: IntegrationStatus;
   rankMathStatus: IntegrationStatus;
@@ -207,6 +236,10 @@ export interface SettingsDto {
     research: TextProviderName[];
     writing: TextProviderName[];
   };
+  modelCatalog: ModelSpecDto[];
+  operationModels: OperationModelsDto;
+  modelOperations: ModelOperationDto[];
+  imageSize: "1K" | "2K" | "4K" | null;
   providers: {
     openai: ProviderStatusDto;
     anthropic: ProviderStatusDto;
@@ -423,6 +456,8 @@ export const api = {
     gscProperty?: string;
     gscServiceAccountJson?: string;
     status?: "ACTIVE" | "DISABLED";
+    allowedModels?: string[];
+    operationModels?: OperationModelsDto;
   }) => request<SiteDto>(`/sites/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteSite: (id: string) => request<{ ok: true; id: string; hiddenContent: number }>(`/sites/${id}`, { method: "DELETE" }),
   testWordPress: (id: string) => request<{ id: string; status: IntegrationStatus; message: string }>(`/sites/${id}/test-wordpress`, { method: "POST" }),
@@ -451,6 +486,9 @@ export const api = {
       research?: TextProviderName[];
       writing?: TextProviderName[];
     };
+    operationModels?: OperationModelsDto;
+    customModels?: Array<Partial<ModelSpecDto>>;
+    imageSize?: "1K" | "2K" | "4K" | "";
   }) => request<SettingsDto>("/settings", { method: "PATCH", body: JSON.stringify(body) }),
   siteReport: (siteId: string, params?: { from?: string; to?: string }) => {
     const search = new URLSearchParams();

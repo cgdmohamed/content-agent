@@ -1,5 +1,6 @@
 import { BadRequestException, Body, Controller, Delete, Get, Injectable, Module, NotFoundException, Param, Patch, Post, Req } from "@nestjs/common";
-import { IsIn, IsOptional, IsString, IsUrl, MaxLength } from "class-validator";
+import { sanitizeAllowedModels, sanitizeOperationModels, type OperationModels } from "@content-agent/shared";
+import { ArrayMaxSize, IsArray, IsIn, IsObject, IsOptional, IsString, IsUrl, MaxLength } from "class-validator";
 import { AuditService } from "../audit/audit.module.js";
 import { DatabaseService } from "../database/database.module.js";
 import { JobQueueService } from "../queue/job-queue.module.js";
@@ -9,6 +10,7 @@ import { fieldLimits } from "../security/payload-limits.js";
 import { normalizeGscProperty, normalizeGscServiceAccountJson, testGscConnection, type GscSiteCredentials } from "../integrations/google-search-console.js";
 import { safeWordPressUrl, testRankMathBridge, testWordPressConnection, type InternalSiteCredentials } from "../integrations/wordpress.js";
 import { buildJobId } from "./content.module.js";
+import { loadModelCatalog } from "./model-catalog.js";
 
 export const sitesListLimit = 200;
 
@@ -106,6 +108,18 @@ class UpdateSiteDto {
   @IsOptional()
   @IsIn(["ACTIVE", "DISABLED"])
   status?: "ACTIVE" | "DISABLED";
+
+  /** "provider:model" keys this site may use; [] removes the restriction. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(60)
+  @IsString({ each: true })
+  allowedModels?: string[];
+
+  /** Per-operation model chains for this site; {} removes all overrides. */
+  @IsOptional()
+  @IsObject()
+  operationModels?: Record<string, unknown>;
 }
 
 interface SiteRow {
@@ -121,6 +135,8 @@ interface SiteRow {
   gsc_status: string;
   status: string;
   gsc_property: string | null;
+  allowed_models: string[] | null;
+  operation_models: OperationModels | null;
   content_count: string;
   published_count: string;
   created_at: Date;
@@ -138,7 +154,7 @@ class SitesService {
   async list(): Promise<Array<Record<string, unknown>>> {
     const result = await this.db.query<SiteRow>(
       `SELECT s.id, s.name, s.wordpress_url, s.wordpress_username, s.market, s.language, s.writing_standard,
-              s.wordpress_status, s.rank_math_status, s.gsc_status, s.status, s.gsc_property, s.created_at, s.updated_at,
+              s.wordpress_status, s.rank_math_status, s.gsc_status, s.status, s.gsc_property, s.allowed_models, s.operation_models, s.created_at, s.updated_at,
               COUNT(c.id)::text AS content_count,
               COUNT(c.id) FILTER (WHERE c.status = 'PUBLISHED')::text AS published_count
        FROM sites s
@@ -157,7 +173,7 @@ class SitesService {
       `INSERT INTO sites (name, wordpress_url, wordpress_username, wordpress_application_password_encrypted, market, language, writing_standard)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING id, name, wordpress_url, wordpress_username, market, language, writing_standard,
-                 wordpress_status, rank_math_status, gsc_status, status, gsc_property, '0'::text AS content_count, '0'::text AS published_count, created_at, updated_at`,
+                 wordpress_status, rank_math_status, gsc_status, status, gsc_property, allowed_models, operation_models, '0'::text AS content_count, '0'::text AS published_count, created_at, updated_at`,
       [
         body.name,
         wordpressUrl,
@@ -179,7 +195,7 @@ class SitesService {
       await this.update(String(result.rows[0]!.id), { gscProperty: body.gscProperty, gscServiceAccountJson: body.gscServiceAccountJson }, actorUserId);
       const updated = await this.db.query<SiteRow>(
         `SELECT id, name, wordpress_url, wordpress_username, market, language, writing_standard,
-                wordpress_status, rank_math_status, gsc_status, status, gsc_property, '0'::text AS content_count, '0'::text AS published_count, created_at, updated_at
+                wordpress_status, rank_math_status, gsc_status, status, gsc_property, allowed_models, operation_models, '0'::text AS content_count, '0'::text AS published_count, created_at, updated_at
          FROM sites WHERE id = $1`,
         [result.rows[0]!.id]
       );
@@ -194,6 +210,10 @@ class SitesService {
     const wordpressUrl = body.wordpressUrl ? safeWordPressInputUrl(body.wordpressUrl) : null;
     const gscProperty = body.gscProperty ? safeGscPropertyInput(body.gscProperty) : null;
     const gscServiceAccountJson = body.gscServiceAccountJson ? safeGscServiceAccountInput(body.gscServiceAccountJson) : null;
+    const catalog = body.allowedModels !== undefined || body.operationModels !== undefined ? await loadModelCatalog(this.db) : [];
+    const allowedModels = body.allowedModels !== undefined ? sanitizeAllowedModels(body.allowedModels, catalog) : null;
+    const operationModels = body.operationModels !== undefined ? sanitizeOperationModels(body.operationModels, catalog) : null;
+    const operationModelsValue = operationModels && Object.keys(operationModels).length > 0 ? operationModels : null;
 
     const result = await this.db.query<SiteRow>(
       `UPDATE sites SET
@@ -207,10 +227,12 @@ class SitesService {
          gsc_property = COALESCE($9, gsc_property),
          gsc_service_account_encrypted = COALESCE($10, gsc_service_account_encrypted),
          status = COALESCE($11, status),
+         allowed_models = CASE WHEN $12::boolean THEN $13::jsonb ELSE allowed_models END,
+         operation_models = CASE WHEN $14::boolean THEN $15::jsonb ELSE operation_models END,
          updated_at = now()
        WHERE id = $1
        RETURNING id, name, wordpress_url, wordpress_username, market, language, writing_standard,
-                 wordpress_status, rank_math_status, gsc_status, status, gsc_property, '0'::text AS content_count, '0'::text AS published_count, created_at, updated_at`,
+                 wordpress_status, rank_math_status, gsc_status, status, gsc_property, allowed_models, operation_models, '0'::text AS content_count, '0'::text AS published_count, created_at, updated_at`,
       [
         id,
         body.name ?? null,
@@ -222,7 +244,11 @@ class SitesService {
         body.writingStandard ?? null,
         gscProperty,
         gscServiceAccountJson ? encryptSecret(gscServiceAccountJson) : null,
-        body.status ?? null
+        body.status ?? null,
+        body.allowedModels !== undefined,
+        allowedModels ? JSON.stringify(allowedModels) : null,
+        body.operationModels !== undefined,
+        operationModelsValue ? JSON.stringify(operationModelsValue) : null
       ]
     );
     await this.audit.record({
@@ -348,6 +374,8 @@ function toPublicSite(row: SiteRow): Record<string, unknown> {
     language: row.language,
     writingStandard: row.writing_standard,
     gscProperty: row.gsc_property,
+    allowedModels: row.allowed_models ?? [],
+    operationModels: row.operation_models ?? {},
     status: row.status,
     wordpressStatus: row.wordpress_status,
     rankMathStatus: row.rank_math_status,

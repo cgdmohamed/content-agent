@@ -1,17 +1,18 @@
-import { query } from "./db.js";
-import { effectiveHardLimit, estimateCostUsd, estimateTokens, isBudgetExceeded } from "./budget.js";
+import { findModel, textCostUsd, type ModelProvider } from "@content-agent/shared";
+import { effectiveHardLimit, isBudgetExceeded, ratesFor, estimateTokens, type PricedProvider } from "./budget.js";
+import { operationKeyFor, providerKey, resolveChainForContent, sanitizeProviderChain } from "./models.js";
 import { releaseSpend, reserveSpend, settleSpend } from "./usage.js";
 
-export { effectiveHardLimit, isBudgetExceeded };
+export { effectiveHardLimit, isBudgetExceeded, sanitizeProviderChain };
 
 export type TextProviderName = "anthropic" | "openai" | "perplexity";
 
 export interface GenerateTextInput {
   contentItemId: string;
+  /** Worker operation name, e.g. WRITE_DRAFT; the model chain is resolved from site/system settings. */
   operation: string;
   prompt: string;
   maxTokens?: number;
-  preferred?: TextProviderName[];
 }
 
 export interface GenerateTextResult {
@@ -23,8 +24,6 @@ export interface GenerateTextResult {
   durationMs: number;
 }
 
-type ProviderRoutingOperation = "GENERATE_IDEAS" | "RESEARCH_GAPS" | "WRITE_DRAFT" | "REVIEW_DRAFT";
-
 interface ProviderCompletion {
   text: string;
   /** Real token usage reported by the provider, when present. */
@@ -32,96 +31,47 @@ interface ProviderCompletion {
   outputTokens?: number;
 }
 
-interface ProviderConfig {
-  name: TextProviderName;
-  model: string;
-  key?: string;
-  generate: (prompt: string, maxTokens: number, key: string, model: string) => Promise<ProviderCompletion>;
-}
-
-const providers: ProviderConfig[] = [
-  {
-    name: "anthropic",
-    model: process.env.ANTHROPIC_MODEL ?? "claude-3-5-sonnet-latest",
-    key: process.env.ANTHROPIC_API_KEY,
-    generate: callAnthropic
-  },
-  {
-    name: "openai",
-    model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
-    key: process.env.OPENAI_API_KEY,
-    generate: callOpenAI
-  },
-  {
-    name: "perplexity",
-    model: process.env.PERPLEXITY_MODEL ?? "sonar-pro",
-    key: process.env.PERPLEXITY_API_KEY,
-    generate: callPerplexity
-  }
-];
+const callers: Record<TextProviderName, (prompt: string, maxTokens: number, key: string, model: string) => Promise<ProviderCompletion>> = {
+  anthropic: callAnthropic,
+  openai: callOpenAI,
+  perplexity: callPerplexity
+};
 
 export async function generateText(input: GenerateTextInput): Promise<GenerateTextResult> {
-  const preferred = await resolveProviderChain(input.operation, input.preferred ?? ["anthropic", "openai", "perplexity"]);
-  const chain = preferred
-    .map((name) => providers.find((provider) => provider.name === name))
-    .filter((provider): provider is ProviderConfig => Boolean(provider?.key));
-
+  const resolved = await resolveChainForContent(input.contentItemId, operationKeyFor(input.operation));
+  const chain = resolved.chain.filter((ref): ref is typeof ref & { provider: TextProviderName } => ref.provider !== "gemini");
   if (chain.length === 0) throw new Error("لا توجد مفاتيح ذكاء اصطناعي مهيأة للعملية النصية.");
 
   const failures: string[] = [];
-  for (const provider of chain) {
+  for (const ref of chain) {
     const started = Date.now();
     const maxTokens = input.maxTokens ?? 2500;
     const promptTokens = estimateTokens(input.prompt);
+    const spec = findModel(resolved.catalog, ref);
+    const rates = ratesFor(ref.provider as PricedProvider);
     // Throws (and stops the whole chain) when the monthly hard limit is reached.
     const reservationId = await reserveSpend({
-      provider: provider.name,
-      model: provider.model,
+      provider: ref.provider,
+      model: ref.model,
       operation: input.operation,
       contentItemId: input.contentItemId,
-      estimatedCostUsd: estimateCostUsd(provider.name, promptTokens, maxTokens)
+      estimatedCostUsd: textCostUsd(spec, rates, promptTokens, maxTokens)
     });
     try {
-      const completion = await provider.generate(input.prompt, maxTokens, provider.key!, provider.model);
+      const completion = await callers[ref.provider](input.prompt, maxTokens, providerKey(ref.provider as ModelProvider)!, ref.model);
       const durationMs = Date.now() - started;
       const inputTokens = completion.inputTokens ?? promptTokens;
       const outputTokens = completion.outputTokens ?? estimateTokens(completion.text);
-      await settleSpend(reservationId, { inputTokens, outputTokens, costUsd: estimateCostUsd(provider.name, inputTokens, outputTokens), durationMs });
-      return { provider: provider.name, model: provider.model, text: completion.text, inputTokens, outputTokens, durationMs };
+      await settleSpend(reservationId, { inputTokens, outputTokens, costUsd: textCostUsd(spec, rates, inputTokens, outputTokens), durationMs });
+      return { provider: ref.provider, model: ref.model, text: completion.text, inputTokens, outputTokens, durationMs };
     } catch (error) {
       const message = error instanceof Error ? error.message : "خطأ غير معروف";
-      failures.push(`${provider.name}: ${message}`);
+      failures.push(`${ref.provider}/${ref.model}: ${message}`);
       await releaseSpend(reservationId, { durationMs: Date.now() - started, error: message });
     }
   }
 
   throw new Error(`فشل كل مزودي الذكاء الاصطناعي: ${failures.join(" | ")}`);
-}
-
-export function sanitizeProviderChain(value: unknown, fallback: TextProviderName[]): TextProviderName[] {
-  if (!Array.isArray(value)) return fallback;
-  const allowed: TextProviderName[] = ["anthropic", "openai", "perplexity"];
-  const unique = value.filter((provider, index): provider is TextProviderName => allowed.includes(provider) && value.indexOf(provider) === index);
-  return unique.length > 0 ? unique : fallback;
-}
-
-async function resolveProviderChain(operation: string, fallback: TextProviderName[]): Promise<TextProviderName[]> {
-  const routingKey = providerRoutingKey(operation);
-  if (!routingKey) return fallback;
-  const settings = await query<{ value: { providerRouting?: Record<string, unknown> } }>(
-    "SELECT value FROM system_settings WHERE key = 'production_settings'"
-  );
-  return sanitizeProviderChain(settings.rows[0]?.value.providerRouting?.[routingKey], fallback);
-}
-
-function providerRoutingKey(operation: string): keyof Record<"ideas" | "research" | "writing", unknown> | null {
-  const map: Record<ProviderRoutingOperation, "ideas" | "research" | "writing"> = {
-    GENERATE_IDEAS: "ideas",
-    RESEARCH_GAPS: "research",
-    WRITE_DRAFT: "writing",
-    REVIEW_DRAFT: "writing"
-  };
-  return map[operation as ProviderRoutingOperation] ?? null;
 }
 
 async function callOpenAI(prompt: string, maxTokens: number, key: string, model: string): Promise<ProviderCompletion> {

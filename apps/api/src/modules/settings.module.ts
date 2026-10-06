@@ -1,6 +1,15 @@
 import { BadRequestException, Body, Controller, Get, Injectable, Module, Patch, Req } from "@nestjs/common";
 import { Type } from "class-transformer";
-import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsBoolean, IsIn, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from "class-validator";
+import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsBoolean, IsIn, IsInt, IsNumber, IsObject, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from "class-validator";
+import {
+  mergeModelCatalog,
+  modelOperations,
+  parseCustomModel,
+  sanitizeOperationModels,
+  type ImageSize,
+  type ModelSpec,
+  type OperationModels
+} from "@content-agent/shared";
 import { AuditService } from "../audit/audit.module.js";
 import { DatabaseService } from "../database/database.module.js";
 import { type AuthenticatedRequest, Roles } from "../security/access-control.js";
@@ -22,6 +31,9 @@ interface StoredSettings {
   defaultMarket?: string;
   autoPublishAfterApproval?: boolean;
   providerRouting?: ProviderRoutingSettings;
+  operationModels?: OperationModels;
+  customModels?: ModelSpec[];
+  imageSize?: ImageSize | null;
 }
 
 interface ProviderPublicStatus {
@@ -83,6 +95,21 @@ class UpdateSettingsDto {
   @ValidateNested()
   @Type(() => ProviderRoutingDto)
   providerRouting?: ProviderRoutingDto;
+
+  /** { ideas: [{provider, model}], ... } — validated against the catalog in the service. */
+  @IsOptional()
+  @IsObject()
+  operationModels?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(30)
+  customModels?: unknown[];
+
+  /** "1K" | "2K" | "4K"; null/"" = model default. */
+  @IsOptional()
+  @IsIn(["1K", "2K", "4K", ""])
+  imageSize?: ImageSize | "";
 }
 
 @Injectable()
@@ -106,11 +133,17 @@ class SettingsService {
 
   async updateSettings(body: UpdateSettingsDto, request: AuthenticatedRequest): Promise<Record<string, unknown>> {
     const current = await this.readStoredSettings();
+    const customModels = body.customModels !== undefined ? parseCustomModels(body.customModels) : current.customModels ?? [];
+    const catalog = mergeModelCatalog(customModels);
+    const { operationModels: _operationModels, customModels: _customModels, imageSize: _imageSize, ...rest } = body;
     const next: StoredSettings = {
       ...current,
-      ...body,
+      ...rest,
       defaultMarket: body.defaultMarket?.trim() || current.defaultMarket || "SA",
-      providerRouting: normalizeProviderRouting(body.providerRouting ?? current.providerRouting)
+      providerRouting: normalizeProviderRouting(body.providerRouting ?? current.providerRouting),
+      customModels,
+      operationModels: body.operationModels !== undefined ? sanitizeOperationModels(body.operationModels, catalog) : sanitizeOperationModels(current.operationModels, catalog),
+      imageSize: body.imageSize !== undefined ? body.imageSize || null : current.imageSize ?? null
     };
     assertBudgetLimits(next);
     await this.db.query(
@@ -145,6 +178,10 @@ class SettingsService {
       defaultMarket: settings.defaultMarket ?? "SA",
       autoPublishAfterApproval: settings.autoPublishAfterApproval ?? false,
       providerRouting: normalizeProviderRouting(settings.providerRouting),
+      modelCatalog: mergeModelCatalog(settings.customModels).map((spec) => ({ ...spec, providerConfigured: providerConfigured(spec.provider) })),
+      operationModels: sanitizeOperationModels(settings.operationModels, mergeModelCatalog(settings.customModels)),
+      modelOperations: modelOperations.map(({ key, label, kind }) => ({ key, label, kind })),
+      imageSize: settings.imageSize ?? null,
       providers: {
         openai: providerStatus(process.env.OPENAI_API_KEY, process.env.OPENAI_MODEL ?? "gpt-4o-mini"),
         anthropic: providerStatus(process.env.ANTHROPIC_API_KEY, process.env.ANTHROPIC_MODEL ?? "claude-3-5-sonnet-latest"),
@@ -153,6 +190,19 @@ class SettingsService {
       }
     };
   }
+}
+
+function parseCustomModels(value: unknown[]): ModelSpec[] {
+  try {
+    return value.map((entry) => parseCustomModel(entry));
+  } catch (error) {
+    throw new BadRequestException(error instanceof Error ? error.message : "بيانات الموديل المخصص غير صالحة.");
+  }
+}
+
+function providerConfigured(provider: ModelSpec["provider"]): boolean {
+  const keys = { anthropic: process.env.ANTHROPIC_API_KEY, openai: process.env.OPENAI_API_KEY, perplexity: process.env.PERPLEXITY_API_KEY, gemini: process.env.GEMINI_API_KEY };
+  return Boolean(keys[provider]?.trim());
 }
 
 function providerStatus(secret: string | undefined, model: string): ProviderPublicStatus {

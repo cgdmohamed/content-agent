@@ -1,6 +1,9 @@
 import { appendAudit, query } from "./db.js";
 import { generateText } from "./ai.js";
 import { imageCostUsd } from "./budget.js";
+import { forgetImage, recallImage, rememberImage } from "./image-cache.js";
+import { resolveChainForContent } from "./models.js";
+import { findModel, imageCostFromUsage } from "@content-agent/shared";
 import { releaseSpend, reserveSpend, settleSpend } from "./usage.js";
 import { sanitizeArticleHtml } from "./html-sanitizer.js";
 import { asStringArray, extractJson } from "./json.js";
@@ -185,22 +188,47 @@ async function publishToWordPress(contentItemId: string): Promise<OperationResul
   return { provider: "wordpress" };
 }
 
+async function generateImageWithChain(contentItemId: string, prompt: string): Promise<Awaited<ReturnType<typeof generateGeminiImage>> & { model: string }> {
+  const cached = recallImage(contentItemId, prompt);
+  if (cached) return { ...cached.image, model: cached.model };
+
+  const resolved = await resolveChainForContent(contentItemId, "image");
+  const failures: string[] = [];
+  for (const ref of resolved.chain) {
+    const spec = findModel(resolved.catalog, ref);
+    const fallbackUsd = imageCostUsd();
+    const reservationId = await reserveSpend({
+      provider: "gemini-image",
+      model: ref.model,
+      operation: "GENERATE_IMAGE",
+      contentItemId,
+      estimatedCostUsd: spec?.imageUsd ?? fallbackUsd
+    });
+    const started = Date.now();
+    try {
+      const image = await generateGeminiImage(prompt, { model: ref.model, imageSize: resolved.imageSize });
+      await settleSpend(reservationId, {
+        inputTokens: image.usage?.textInputTokens ?? 0,
+        outputTokens: (image.usage?.imageOutputTokens ?? 0) + (image.usage?.textOutputTokens ?? 0),
+        costUsd: imageCostFromUsage(spec, fallbackUsd, image.usage),
+        durationMs: Date.now() - started
+      });
+      rememberImage(contentItemId, prompt, ref.model, image);
+      return { ...image, model: ref.model };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "خطأ غير معروف";
+      failures.push(`${ref.model}: ${message}`);
+      await releaseSpend(reservationId, { durationMs: Date.now() - started, error: message });
+    }
+  }
+  throw new Error(`فشل توليد الصورة بكل الموديلات المتاحة: ${failures.join(" | ")}`);
+}
+
 async function generateFeaturedImage(contentItemId: string): Promise<OperationResult> {
   const item = await fetchContent(contentItemId);
   if (!item.title) throw new Error("لا يمكن توليد صورة بدون عنوان المقال.");
   const prompt = item.image_prompt?.trim() || `Editorial blog feature image for: ${item.title}`;
-  const imageModel = process.env.GEMINI_IMAGE_MODEL ?? "gemini-3.1-flash-image";
-  const costUsd = imageCostUsd();
-  const reservationId = await reserveSpend({ provider: "gemini-image", model: imageModel, operation: "GENERATE_IMAGE", contentItemId, estimatedCostUsd: costUsd });
-  const imageStarted = Date.now();
-  let generated: Awaited<ReturnType<typeof generateGeminiImage>>;
-  try {
-    generated = await generateGeminiImage(prompt);
-  } catch (error) {
-    await releaseSpend(reservationId, { durationMs: Date.now() - imageStarted, error: error instanceof Error ? error.message : "خطأ غير معروف" });
-    throw error;
-  }
-  await settleSpend(reservationId, { inputTokens: 0, outputTokens: 0, costUsd, durationMs: Date.now() - imageStarted });
+  const generated = await generateImageWithChain(contentItemId, prompt);
   const extension = generated.mimeType.includes("jpeg") || generated.mimeType.includes("jpg") ? "jpg" : "png";
   const media = await uploadMedia(
     {
@@ -227,7 +255,9 @@ async function generateFeaturedImage(contentItemId: string): Promise<OperationRe
      WHERE id = $1`,
     [contentItemId, media.id, media.sourceUrl]
   );
+  forgetImage(contentItemId, prompt);
   await appendAudit(contentItemId, "FEATURED_IMAGE_READY", "تم توليد الصورة ورفعها إلى ووردبريس", {
+    model: generated.model,
     wordpressMediaId: media.id,
     imageUrl: media.sourceUrl,
     mimeType: generated.mimeType
@@ -247,7 +277,7 @@ async function generateIdeas(contentItemId: string): Promise<OperationResult> {
     "اجعل targetKeyword قصيرة وطبيعية وقابلة للاستخدام حرفيًا في SEO title وmeta description والـ URL، ويفضل 4 إلى 7 كلمات بدون حروف زائدة.",
     'أعد JSON فقط بالشكل: [{"title":"...","targetKeyword":"...","angle":"..."}]'
   ].join("\n");
-  const result = await generateText({ contentItemId, operation: "GENERATE_IDEAS", prompt, preferred: ["perplexity", "openai", "anthropic"] });
+  const result = await generateText({ contentItemId, operation: "GENERATE_IDEAS", prompt });
   const parsed = extractJson(result.text);
   if (!Array.isArray(parsed)) throw new Error("رد توليد الأفكار ليس JSON array صالحًا.");
   const ideas = parsed.map(normalizeIdea).filter(Boolean);
@@ -297,7 +327,7 @@ async function researchGaps(contentItemId: string): Promise<OperationResult> {
     "لخص أعلى الفجوات العملية بدون نسخ المنافسين أو الاعتماد على صفحات ضعيفة فقط لأنها متصدرة.",
     'أعد JSON فقط بالشكل: {"summary":"...","gaps":["..."],"sources":["https://..."]}'
   ].join("\n");
-  const result = await generateText({ contentItemId, operation: "RESEARCH_GAPS", prompt, preferred: ["perplexity", "anthropic", "openai"], maxTokens: 3000 });
+  const result = await generateText({ contentItemId, operation: "RESEARCH_GAPS", prompt, maxTokens: 3000 });
   const parsed = extractJson(result.text) as Record<string, unknown> | null;
   if (!parsed || typeof parsed !== "object") throw new Error("رد البحث ليس JSON object صالحًا.");
   const gaps = [parsed.summary, ...(Array.isArray(parsed.gaps) ? parsed.gaps : [])].filter(Boolean).join("\n");
@@ -352,7 +382,7 @@ async function writeDraft(contentItemId: string): Promise<OperationResult> {
     "- عند عرض بيانات متعددة في جدول، استخدم HTML table كاملًا فقط: table وthead وtbody وtr وth وtd. ممنوع كتابة أعمدة الجدول كنص متلاصق أو مفصول بمسافات.",
     'أعد JSON فقط بالشكل: {"title":"...","metaDescription":"...","contentHtml":"...","suggestedTags":["..."],"category":"...","imagePrompt":"...","imageAlt":"..."}'
   ].join("\n\n");
-  const result = await generateText({ contentItemId, operation: "WRITE_DRAFT", prompt, preferred: ["anthropic", "openai"], maxTokens: 6000 });
+  const result = await generateText({ contentItemId, operation: "WRITE_DRAFT", prompt, maxTokens: 6000 });
   const focusKeyword = String(idea.targetKeyword ?? idea.target_keyword ?? item.target_keyword ?? "");
   const article = optimizeArticleForRankMath(parseArticle(result.text), item, focusKeyword);
   const contentHtml = enforceArticleRequirements(article.contentHtml, item, internalLinks);
@@ -407,7 +437,7 @@ async function reviewDraft(contentItemId: string): Promise<OperationResult> {
     item.draft_html,
     'أعد JSON فقط بالشكل: {"title":"...","metaDescription":"...","contentHtml":"...","suggestedTags":["..."],"category":"...","imagePrompt":"...","imageAlt":"..."}'
   ].join("\n\n");
-  const result = await generateText({ contentItemId, operation: "REVIEW_DRAFT", prompt, preferred: ["anthropic", "openai"], maxTokens: 6000 });
+  const result = await generateText({ contentItemId, operation: "REVIEW_DRAFT", prompt, maxTokens: 6000 });
   const article = optimizeArticleForRankMath(parseArticle(result.text), item, item.target_keyword ?? "");
   const contentHtml = enforceArticleRequirements(article.contentHtml, item, internalLinks);
   const score = scoreArticle({
@@ -466,7 +496,7 @@ async function optimizeLinksAndCta(contentItemId: string): Promise<OperationResu
     item.draft_html,
     'أعد JSON فقط بالشكل: {"title":"...","metaDescription":"...","contentHtml":"...","suggestedTags":["..."],"category":"...","imagePrompt":"...","imageAlt":"..."}'
   ].join("\n\n");
-  const result = await generateText({ contentItemId, operation: "OPTIMIZE_LINKS", prompt, preferred: ["anthropic", "openai"], maxTokens: 5000 });
+  const result = await generateText({ contentItemId, operation: "OPTIMIZE_LINKS", prompt, maxTokens: 5000 });
   const article = optimizeArticleForRankMath(parseArticle(result.text), item, item.target_keyword ?? "");
   const contentHtml = enforceArticleRequirements(article.contentHtml, item, internalLinks);
   const score = scoreArticle({

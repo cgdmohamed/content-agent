@@ -1,22 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent, type ReactElement } from "react";
-import type { ProviderName } from "@content-agent/shared";
-import { api, type ProviderStatusDto } from "../api/client";
+import { api, type ModelSpecDto, type ProviderStatusDto } from "../api/client";
+import { OperationModelPickers, readOperationModels } from "../ui/ModelPickers";
 import { ActionError, ErrorState, LoadingState } from "../ui/StateViews";
-
-type TextProviderName = Exclude<ProviderName, "gemini-image">;
-
-const providerOptions: Array<{ value: TextProviderName; label: string }> = [
-  { value: "anthropic", label: "أنثروبيك" },
-  { value: "openai", label: "أوبن إيه آي" },
-  { value: "perplexity", label: "بيربلكسيتي" }
-];
 
 export function Settings(): ReactElement {
   const queryClient = useQueryClient();
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.settings });
   const [saved, setSaved] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [customModels, setCustomModels] = useState<ModelSpecDto[] | null>(null);
+  const [draft, setDraft] = useState({ provider: "openai", kind: "text", model: "", label: "", inputPerM: "", outputPerM: "", imageUsd: "", imageOutputPerM: "" });
   const updateSettings = useMutation({
     mutationFn: api.updateSettings,
     onSuccess: async () => {
@@ -28,6 +22,28 @@ export function Settings(): ReactElement {
 
   if (settings.isLoading) return <LoadingState />;
   if (settings.isError || !settings.data) return <ErrorState />;
+  const savedCustom = settings.data.modelCatalog.filter((spec) => spec.custom);
+  const custom = customModels ?? savedCustom;
+
+  function addCustomModel(): void {
+    setLocalError(null);
+    const isImage = draft.kind === "image";
+    if (!draft.model.trim()) return setLocalError("معرّف الموديل مطلوب.");
+    if (isImage ? draft.imageUsd === "" : draft.inputPerM === "" || draft.outputPerM === "") return setLocalError("أدخل أسعار الموديل.");
+    const spec: ModelSpecDto = {
+      provider: isImage ? "gemini" : (draft.provider as ModelSpecDto["provider"]),
+      model: draft.model.trim(),
+      label: draft.label.trim() || draft.model.trim(),
+      kind: isImage ? "image" : "text",
+      custom: true,
+      providerConfigured: true,
+      ...(isImage
+        ? { imageUsd: Number(draft.imageUsd), ...(draft.imageOutputPerM !== "" ? { imageOutputPerM: Number(draft.imageOutputPerM) } : {}) }
+        : { inputPerM: Number(draft.inputPerM), outputPerM: Number(draft.outputPerM) })
+    };
+    setCustomModels([...custom.filter((item) => !(item.provider === spec.provider && item.model === spec.model)), spec]);
+    setDraft({ ...draft, model: "", label: "", inputPerM: "", outputPerM: "", imageUsd: "", imageOutputPerM: "" });
+  }
 
   function submit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
@@ -46,11 +62,9 @@ export function Settings(): ReactElement {
       defaultIdeasCount: Number(data.get("defaultIdeasCount") ?? 5),
       defaultMarket: String(data.get("defaultMarket") ?? "SA"),
       autoPublishAfterApproval: data.get("autoPublishAfterApproval") === "on",
-      providerRouting: {
-        ideas: readProviderOrder(data, "providerIdeas"),
-        research: readProviderOrder(data, "providerResearch"),
-        writing: readProviderOrder(data, "providerWriting")
-      }
+      operationModels: readOperationModels(data, "model", settings.data!.modelOperations, settings.data!.modelCatalog),
+      customModels: custom.map(({ provider, model, label, kind, inputPerM, outputPerM, imageUsd, imageOutputPerM }) => ({ provider, model, label, kind, inputPerM, outputPerM, imageUsd, imageOutputPerM })),
+      imageSize: (String(data.get("imageSize") ?? "") as "" | "1K" | "2K" | "4K")
     });
   }
 
@@ -69,11 +83,62 @@ export function Settings(): ReactElement {
           </label>
         </div>
         <div className="mt-6">
-          <h3 className="text-sm font-semibold text-slate-700">ترتيب مزودي النصوص</h3>
-          <div className="mt-3 grid gap-4 md:grid-cols-3">
-            <ProviderOrder name="providerIdeas" label="الأفكار" defaultValue={settings.data.providerRouting.ideas} />
-            <ProviderOrder name="providerResearch" label="بحث المنافسين" defaultValue={settings.data.providerRouting.research} />
-            <ProviderOrder name="providerWriting" label="الكتابة والمراجعة" defaultValue={settings.data.providerRouting.writing} />
+          <h3 className="text-sm font-semibold text-slate-700">الموديل لكل عملية</h3>
+          <p className="mt-1 text-xs text-slate-500">اختر الموديل الأساسي وبديلًا عند الفشل لكل عملية. "افتراضي النظام" يعني الترتيب والموديلات من متغيرات البيئة. يمكن تخصيصها لكل موقع من شاشة المواقع.</p>
+          <div className="mt-3">
+            <OperationModelPickers prefix="model" operations={settings.data.modelOperations} catalog={settings.data.modelCatalog} value={settings.data.operationModels} emptyLabel="افتراضي النظام" />
+          </div>
+          <label className="mt-4 block max-w-xs">
+            <span className="text-sm font-medium text-slate-600">دقة الصورة المميزة</span>
+            <select name="imageSize" defaultValue={settings.data.imageSize ?? ""} className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm">
+              <option value="">افتراضي الموديل</option>
+              <option value="1K">1K (الأرخص)</option>
+              <option value="2K">2K</option>
+              <option value="4K">4K (الأغلى)</option>
+            </select>
+            <span className="mt-1 block text-xs text-slate-500">الدقة الأعلى ترفع سعر الصورة. بعض الموديلات القديمة لا تدعم هذا الخيار.</span>
+          </label>
+        </div>
+        <div className="mt-6">
+          <h3 className="text-sm font-semibold text-slate-700">موديلات مخصصة وأسعارها</h3>
+          <p className="mt-1 text-xs text-slate-500">أضف أي موديل جديد أو صحّح سعر موديل موجود (نفس المعرّف يستبدل السعر الافتراضي). الأسعار تُستخدم لحساب الميزانية. بعد الحفظ يظهر الموديل في القوائم أعلاه.</p>
+          {custom.length > 0 ? (
+            <ul className="mt-3 space-y-1 text-sm">
+              {custom.map((spec) => (
+                <li key={`${spec.provider}:${spec.model}`} className="flex items-center justify-between rounded-md border border-slate-200 px-3 py-2">
+                  <span>{spec.label} <span className="text-xs text-slate-500">({spec.provider}:{spec.model} · {spec.kind === "image" ? `${spec.imageUsd}$ / صورة` : `${spec.inputPerM}$ / ${spec.outputPerM}$ لكل مليون`})</span></span>
+                  <button type="button" className="text-xs font-semibold text-red-600" onClick={() => setCustomModels(custom.filter((item) => item !== spec))}>إزالة</button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <div className="mt-3 grid gap-3 md:grid-cols-4">
+            <label><span className="text-xs text-slate-500">النوع</span>
+              <select value={draft.kind} onChange={(event) => setDraft({ ...draft, kind: event.target.value })} className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm">
+                <option value="text">نص</option><option value="image">صورة (Gemini)</option>
+              </select>
+            </label>
+            {draft.kind === "text" ? (
+              <label><span className="text-xs text-slate-500">المزود</span>
+                <select value={draft.provider} onChange={(event) => setDraft({ ...draft, provider: event.target.value })} className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm">
+                  <option value="anthropic">Anthropic</option><option value="openai">OpenAI</option><option value="perplexity">Perplexity</option>
+                </select>
+              </label>
+            ) : null}
+            <label><span className="text-xs text-slate-500">معرّف الموديل</span><input dir="ltr" value={draft.model} onChange={(event) => setDraft({ ...draft, model: event.target.value })} className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm" /></label>
+            <label><span className="text-xs text-slate-500">الاسم الظاهر</span><input value={draft.label} onChange={(event) => setDraft({ ...draft, label: event.target.value })} className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm" /></label>
+            {draft.kind === "text" ? (
+              <>
+                <label><span className="text-xs text-slate-500">سعر الدخل $/مليون</span><input type="number" min={0} step="0.01" value={draft.inputPerM} onChange={(event) => setDraft({ ...draft, inputPerM: event.target.value })} className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm" /></label>
+                <label><span className="text-xs text-slate-500">سعر الخرج $/مليون</span><input type="number" min={0} step="0.01" value={draft.outputPerM} onChange={(event) => setDraft({ ...draft, outputPerM: event.target.value })} className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm" /></label>
+              </>
+            ) : (
+              <>
+                <label><span className="text-xs text-slate-500">سعر الصورة $</span><input type="number" min={0} step="0.001" value={draft.imageUsd} onChange={(event) => setDraft({ ...draft, imageUsd: event.target.value })} className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm" /></label>
+                <label><span className="text-xs text-slate-500">سعر توكن الصورة $/مليون (اختياري)</span><input type="number" min={0} step="0.01" value={draft.imageOutputPerM} onChange={(event) => setDraft({ ...draft, imageOutputPerM: event.target.value })} className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm" /></label>
+              </>
+            )}
+            <div className="flex items-end"><button type="button" onClick={addCustomModel} className="rounded-md border border-teal px-3 py-2 text-sm font-semibold text-teal">إضافة</button></div>
           </div>
         </div>
         <div className="mt-5 flex items-center gap-3">
@@ -127,24 +192,4 @@ function Provider(props: { label: string; status: ProviderStatusDto }): ReactEle
       <p className="mt-1 text-xs text-slate-500">الموديل: {props.status.model ?? "غير محدد"}</p>
     </div>
   );
-}
-
-function ProviderOrder(props: { name: string; label: string; defaultValue: TextProviderName[] }): ReactElement {
-  return (
-    <label>
-      <span className="text-sm font-medium text-slate-600">{props.label}</span>
-      <select name={props.name} multiple defaultValue={props.defaultValue} className="mt-1 h-28 w-full rounded-md border border-slate-200 px-3 py-2 text-sm">
-        {providerOptions.map((provider) => (
-          <option key={provider.value} value={provider.value}>
-            {provider.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-function readProviderOrder(data: FormData, name: string): TextProviderName[] {
-  const values = data.getAll(name).map(String).filter((value): value is TextProviderName => providerOptions.some((provider) => provider.value === value));
-  return values.length > 0 ? values : providerOptions.map((provider) => provider.value);
 }

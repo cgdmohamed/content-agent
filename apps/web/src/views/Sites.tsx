@@ -7,6 +7,7 @@ import type { SiteDto } from "../api/client";
 import { useCurrentUser } from "../auth";
 import { IconButton } from "../ui/IconButton";
 import { integrationLabels } from "../ui/labels";
+import { AllowedModelsPicker, OperationModelPickers, readOperationModels } from "../ui/ModelPickers";
 import { ActionError, EmptyState, ErrorState, LoadingState } from "../ui/StateViews";
 
 export function Sites(): ReactElement {
@@ -14,6 +15,7 @@ export function Sites(): ReactElement {
   const user = useCurrentUser();
   const isAdmin = user.role === "ADMIN";
   const sites = useQuery({ queryKey: ["sites"], queryFn: api.sites });
+  const settings = useQuery({ queryKey: ["settings"], queryFn: api.settings, enabled: isAdmin });
   const [formOpen, setFormOpen] = useState(false);
   const [editingSite, setEditingSite] = useState<SiteDto | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SiteDto | null>(null);
@@ -96,7 +98,13 @@ export function Sites(): ReactElement {
         language: String(data.get("language") ?? editingSite.language),
         writingStandard: String(data.get("writingStandard") ?? ""),
         gscProperty: String(data.get("gscProperty") ?? ""),
-        gscServiceAccountJson: optionalString(data.get("gscServiceAccountJson"))
+        gscServiceAccountJson: optionalString(data.get("gscServiceAccountJson")),
+        ...(settings.data
+          ? {
+              allowedModels: data.getAll("allowedModels").map(String),
+              operationModels: readOperationModels(data, "siteModel", settings.data.modelOperations, settings.data.modelCatalog)
+            }
+          : {})
       }
     });
   }
@@ -153,6 +161,20 @@ export function Sites(): ReactElement {
             <span className="text-sm font-medium text-slate-600">بيانات حساب خدمة جوجل الجديدة</span>
             <textarea name="gscServiceAccountJson" className="mt-1 min-h-28 w-full rounded-md border border-slate-200 px-3 py-2 text-left text-xs" dir="ltr" />
           </label>
+          {settings.data ? (
+            <div className="space-y-3 md:col-span-2">
+              <h4 className="text-sm font-semibold text-slate-700">الذكاء الاصطناعي لهذا الموقع</h4>
+              <AllowedModelsPicker name="allowedModels" catalog={settings.data.modelCatalog} value={editingSite.allowedModels ?? []} />
+              <OperationModelPickers
+                key={editingSite.id}
+                prefix="siteModel"
+                operations={settings.data.modelOperations}
+                catalog={settings.data.modelCatalog}
+                value={editingSite.operationModels ?? {}}
+                emptyLabel="افتراضي النظام"
+              />
+            </div>
+          ) : null}
           <div className="md:col-span-2">
             <button className="rounded-md bg-teal px-4 py-2 text-sm font-semibold text-white" disabled={updateSite.isPending}>
               {updateSite.isPending ? "جاري التحديث..." : "حفظ التعديلات"}
