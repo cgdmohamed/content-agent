@@ -17,9 +17,13 @@
     "build:packages": "pnpm --filter @content-agent/types --filter @content-agent/config --filter @content-agent/shared build",
     "pretypecheck": "pnpm build:packages",
     "pretest": "pnpm build:packages",
-    "prelint": "pnpm build:packages"
+    "prelint": "pnpm build:packages",
+    "test:integration": "pnpm -r --if-present test:integration",
+    "e2e": "playwright test -c e2e/playwright.config.ts",
+    "pretest:integration": "pnpm build:packages"
   },
   "devDependencies": {
+    "@playwright/test": "1.56.1",
     "@types/node": "^22.10.2",
     "@types/pg": "^8.23.1",
     "libsodium-wrappers": "^0.8.4",

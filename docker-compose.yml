@@ -58,6 +58,10 @@ services:
       MONTHLY_AI_HARD_LIMIT_USD: ${MONTHLY_AI_HARD_LIMIT_USD:-40}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
       TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-2}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
     expose:
       - "3000"
     depends_on:
@@ -99,6 +103,9 @@ services:
       MONTHLY_AI_BUDGET_USD: ${MONTHLY_AI_BUDGET_USD:-30}
       MONTHLY_AI_HARD_LIMIT_USD: ${MONTHLY_AI_HARD_LIMIT_USD:-40}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       postgres:
         condition: service_healthy
@@ -106,6 +113,13 @@ services:
         condition: service_healthy
       api:
         condition: service_started
+    healthcheck:
+      # Passes only while the worker keeps writing its heartbeat to Redis.
+      test: ["CMD", "node", "dist/healthcheck.js"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     networks:
       - content-agent
 

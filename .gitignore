@@ -14,3 +14,7 @@ packages/*/dist/
 
 *.log
 coverage/
+
+# Playwright
+test-results/
+playwright-report/

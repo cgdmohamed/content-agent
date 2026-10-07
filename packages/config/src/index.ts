@@ -30,6 +30,13 @@ export const envSchema = z.object({
   BOOTSTRAP_ADMIN_PASSWORD: z.string().min(8).optional(),
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(2),
   /** Reverse proxies in front of the API (Coolify/Traefik + the web container's nginx = 2). */
+  /** Optional error tracking; everything is a no-op when unset. */
+  SENTRY_DSN: z.string().url().optional().or(z.literal("").transform(() => undefined)),
+  SENTRY_ENVIRONMENT: z.string().optional(),
+  /** Bearer token for GET /api/metrics; the endpoint is disabled when unset. */
+  METRICS_TOKEN: z.string().min(16).optional().or(z.literal("").transform(() => undefined)),
+  LOG_FORMAT: z.enum(["json", "pretty"]).optional(),
+  LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(2)
 }).superRefine((value, context) => {
   if (value.MONTHLY_AI_HARD_LIMIT_USD > 0 && value.MONTHLY_AI_HARD_LIMIT_USD < value.MONTHLY_AI_BUDGET_USD) {

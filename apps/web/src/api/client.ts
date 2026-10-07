@@ -14,7 +14,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init
   });
   if (!response.ok) {
-    if (response.status === 401) {
+    // The login endpoint answers 401 with its own message ("wrong credentials"); every other 401 means the session ended.
+    if (response.status === 401 && path !== "/auth/login") {
       // A 401 on any call except the login/session probes means the session ended mid-work.
       if (!path.startsWith("/auth/")) window.dispatchEvent(new Event(sessionExpiredEvent));
       throw new Error(sessionExpiredMessage);

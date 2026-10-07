@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
     "test": "vitest run",
-    "start": "node dist/main.js"
+    "start": "node dist/main.js",
+    "test:integration": "pnpm build && vitest run -c vitest.integration.config.ts"
   },
   "dependencies": {
     "@content-agent/config": "workspace:*",

@@ -1,4 +1,6 @@
-import { Body, Controller, HttpCode, Logger, Module, Post, Req } from "@nestjs/common";
+import { Body, Controller, HttpCode, Module, Post, Req } from "@nestjs/common";
+import { captureMessage } from "@content-agent/shared/monitoring";
+import { observability } from "../observability/observability.js";
 import { IsOptional, IsString, MaxLength } from "class-validator";
 import { type AuthenticatedRequest } from "../security/access-control.js";
 import type { RequestWithId } from "../security/request-id.js";
@@ -42,13 +44,13 @@ export function formatClientError(body: ClientErrorDto, context: { userId?: stri
 
 @Controller("client-errors")
 class ClientErrorsController {
-  private readonly logger = new Logger("ClientError");
-
   /** Browser crashes (React Error Boundary, unhandled rejections) so operators see them next to API logs. */
   @Post()
   @HttpCode(204)
   report(@Body() body: ClientErrorDto, @Req() request: AuthenticatedRequest & RequestWithId): void {
-    this.logger.error(formatClientError(body, { userId: request.user?.id, requestId: request.requestId }));
+    const context = { userId: request.user?.id, requestId: request.requestId };
+    observability().logger.error("web client error", { ...context, source: "web", message: body.message, url: body.url, stack: body.stack, componentStack: body.componentStack });
+    captureMessage(`web: ${body.message}`.slice(0, 200), { ...context, url: body.url, stack: body.stack, componentStack: body.componentStack });
   }
 }
 

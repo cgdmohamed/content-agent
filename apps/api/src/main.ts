@@ -1,50 +1,32 @@
 import "reflect-metadata";
-import cookieParser from "cookie-parser";
-import helmet from "helmet";
-import { json, urlencoded } from "express";
 import { NestFactory } from "@nestjs/core";
-import { ValidationPipe } from "@nestjs/common";
 import { loadEnv } from "@content-agent/config";
 import { AppModule } from "./modules/app.module.js";
-import { ApiExceptionFilter } from "./security/api-exception-filter.js";
-import { formBodyLimit, jsonBodyLimit } from "./security/payload-limits.js";
-import { requestIdMiddleware } from "./security/request-id.js";
-import { validationExceptionFactory } from "./security/validation-errors.js";
+import { configureApp } from "./app-setup.js";
+import { nestLogger } from "./observability/nest-logger.js";
+import { observability } from "./observability/observability.js";
+import { flushMonitoring, initMonitoring } from "@content-agent/shared/monitoring";
 
 async function bootstrap(): Promise<void> {
   console.info("بدء تشغيل API...");
   const env = loadEnv();
   console.info(`تم تحميل إعدادات API. المنفذ: ${env.API_PORT}`);
-  const app = await NestFactory.create(AppModule);
+  const { logger } = observability();
+  const monitoring = await initMonitoring({ dsn: env.SENTRY_DSN, service: "api", environment: env.SENTRY_ENVIRONMENT });
+  if (monitoring) logger.info("error tracking enabled");
+  // Structured Nest logs in production; Nest's readable default while developing.
+  const useJson = env.LOG_FORMAT === "json" || (env.LOG_FORMAT === undefined && env.NODE_ENV === "production");
+  const app = await NestFactory.create(AppModule, useJson ? { logger: nestLogger(logger) } : {});
   console.info("تم إنشاء تطبيق API.");
-  app.getHttpAdapter().getInstance().set("trust proxy", env.TRUST_PROXY_HOPS);
-  app.enableShutdownHooks();
-  app.setGlobalPrefix("api");
-  app.use(requestIdMiddleware);
-  app.use(helmet());
-  app.use(json({ limit: jsonBodyLimit }));
-  app.use(urlencoded({ extended: true, limit: formBodyLimit }));
-  app.use(cookieParser());
-  app.enableCors({
-    origin: env.PUBLIC_WEB_URL,
-    credentials: true
-  });
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-      exceptionFactory: validationExceptionFactory
-    })
-  );
-  app.useGlobalFilters(new ApiExceptionFilter());
+  configureApp(app, env);
   const port = env.API_PORT;
   await app.listen(port);
   console.info(`API جاهز ويستمع على المنفذ ${port}.`);
 }
 
-await bootstrap().catch((error: unknown) => {
+await bootstrap().catch(async (error: unknown) => {
   console.error("فشل تشغيل API.");
   console.error(error instanceof Error ? error.stack || error.message : String(error));
+  await flushMonitoring();
   process.exit(1);
 });

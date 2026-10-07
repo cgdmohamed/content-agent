@@ -26,6 +26,11 @@ describe("api exception filter", () => {
     expect(response.rejected).toEqual([{ topic: "موضوع مكرر" }]);
   });
 
+  it("answers 400, not 500, for malformed identifiers rejected by PostgreSQL", () => {
+    const response = toApiErrorResponse(Object.assign(new Error('invalid input syntax for type uuid: "x"'), { code: "22P02" }), true);
+    expect(response).toMatchObject({ statusCode: 400, message: "المعرّف أو القيمة المرسلة غير صالحة." });
+  });
+
   it("hides unexpected exception details in production", () => {
     const response = toApiErrorResponse(new Error("database password leaked in stack"), true);
 

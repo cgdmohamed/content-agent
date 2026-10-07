@@ -2,6 +2,7 @@ import { Controller, Get, HttpStatus, Injectable, Module, OnModuleDestroy, Res }
 import { Redis } from "ioredis";
 import type { Response } from "express";
 import { loadEnv } from "@content-agent/config";
+import { workerHeartbeatKey, workerIsAlive } from "@content-agent/shared";
 import { DatabaseService } from "../database/database.module.js";
 import { Public } from "../security/access-control.js";
 
@@ -21,6 +22,11 @@ class RedisHealthService implements OnModuleDestroy {
   async onModuleDestroy(): Promise<void> {
     if (this.client.status === "ready") await this.client.quit();
     else this.client.disconnect();
+  }
+
+  async get(key: string): Promise<string | null> {
+    if (this.client.status === "wait") await this.client.connect();
+    return this.client.get(key);
   }
 
   async ping(): Promise<boolean> {
@@ -58,6 +64,12 @@ class HealthController {
     }
     const status = readinessStatus(checks);
     response.status(readinessHttpStatus(status));
+    // Informational only: a worker restart must not take the API out of the load balancer.
+    try {
+      checks.worker = workerIsAlive(await this.redis.get(workerHeartbeatKey)) ? "يعمل" : "لا توجد إشارة حديثة";
+    } catch {
+      checks.worker = "غير معروف";
+    }
     return { status, checks };
   }
 }

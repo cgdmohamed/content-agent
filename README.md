@@ -229,6 +229,21 @@ For a short launch checklist, see `PRODUCTION_CHECKLIST.md`.
 
 Every mutation shows a toast on success (via `meta.successMessage` on the mutation) and on failure (global `MutationCache` handler; the login form opts out with `meta.silent`). React render crashes are caught by an Error Boundary: one per route, so navigation keeps working and moving to another route clears it, plus a page-level fallback. Crashes, `window.onerror` and unhandled promise rejections are posted to `POST /api/client-errors` (authenticated, length-limited, at most 5 per page load) and written to the API log as one JSON line with the user id and request id, so they can be found next to server errors.
 
+### Testing
+
+- `pnpm verify`: typecheck, unit tests, lint and build (no services needed).
+- `pnpm test:integration`: needs PostgreSQL and Redis (`TEST_DATABASE_URL`, `TEST_REDIS_URL`; the database is wiped, use a throwaway one). Covers the SQL migrations, the API over real HTTP (auth, session revocation, login rate limit in Redis, CSRF origin check, queueing into BullMQ, per-site model settings, metrics), the worker pipeline NEW → PUBLISHED with stubbed AI/WordPress/Gemini responses (metered cost, model allow-list, fallback, hard budget limit, retry without paying for a second image, WordPress duplicate adoption) and concurrent AI-budget reservations.
+- `pnpm e2e`: Playwright against the built API and web bundle (`pnpm build` first; set `CHROMIUM_PATH` to use a preinstalled Chromium, otherwise `pnpm exec playwright install chromium`).
+- GitHub Actions runs all of the above (`.github/workflows/ci.yml`) with PostgreSQL and Redis service containers.
+
+### Monitoring
+
+- **Logs:** structured JSON, one object per line (`ts`, `level`, `service`, `msg` plus fields such as `requestId`, `jobId`, `operation`, `durationMs`, `userId`), with passwords/tokens/keys redacted. This is the default in production; `LOG_FORMAT=pretty|json` and `LOG_LEVEL` override it. Every API request is logged (path without query string; health and metrics scrapes only when they fail), and the `requestId` in an error response matches the log line. The worker logs `job started / completed / failed, will retry / failed permanently` with attempt number and duration.
+- **Error tracking (optional):** set `SENTRY_DSN` to send API 5xx errors, browser crashes reported through `/api/client-errors`, worker permanent job failures and unhandled worker exceptions to Sentry (errors only, no tracing, no request bodies or cookies). Without a DSN nothing is loaded.
+- **Metrics:** set `METRICS_TOKEN` and scrape `GET /api/metrics` with `Authorization: Bearer <token>` (the endpoint is a 404 while the token is unset; the nginx container proxies `/api/`, so scrape it through the public domain or restrict it there). Exposed: `content_agent_content_items{status}`, `content_agent_jobs{queue,status}`, `content_agent_jobs_failed_last_hour`, `content_agent_oldest_waiting_job_seconds`, `content_agent_ai_spend_month_usd`, `content_agent_worker_up`, `content_agent_worker_heartbeat_age_seconds`, `content_agent_http_requests_total{method,status}` and a request-duration histogram.
+- **Worker liveness:** the worker writes a heartbeat to Redis every 15 seconds. Docker's worker healthcheck (`dist/healthcheck.js`) fails when it goes stale, `GET /api/health/ready` reports it under `checks.worker` (informational, it does not make the API unready) and `content_agent_worker_up` exposes it.
+- **Suggested alerts:** `content_agent_worker_up == 0` for 2 minutes; `content_agent_oldest_waiting_job_seconds > 600`; `content_agent_jobs_failed_last_hour > 5`; `content_agent_ai_spend_month_usd` above 80% of `MONTHLY_AI_BUDGET_USD`; 5xx rate from `content_agent_http_requests_total{status="5xx"}`.
+
 ### Operations Runbook
 
 - Use the Operations page for failed, waiting, delayed, completed, and cancelled jobs. Failed content jobs can be retried; waiting or delayed jobs can be cancelled before execution.

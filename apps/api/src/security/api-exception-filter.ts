@@ -1,4 +1,6 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus } from "@nestjs/common";
+import { captureException } from "@content-agent/shared/monitoring";
+import { observability } from "../observability/observability.js";
 
 export type ApiErrorResponse = {
   statusCode: number;
@@ -43,6 +45,11 @@ export function toApiErrorResponse(exception: unknown, isProduction: boolean): A
     };
   }
 
+  // PostgreSQL "invalid input syntax" (e.g. a malformed UUID in a URL or body) is the caller's mistake, not a server fault.
+  if (isInvalidTextRepresentation(exception)) {
+    return { statusCode: HttpStatus.BAD_REQUEST, message: "المعرّف أو القيمة المرسلة غير صالحة.", error: "Bad Request" };
+  }
+
   return {
     statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
     message: isProduction ? genericUnexpectedMessage : normalizeUnexpectedMessage(exception),
@@ -59,8 +66,9 @@ export class ApiExceptionFilter implements ExceptionFilter {
     const isProduction = process.env.NODE_ENV === "production";
     const body = withRequestId(toApiErrorResponse(exception, isProduction), request.requestId);
 
-    if (!(exception instanceof HttpException)) {
-      console.error("Unhandled API exception", { requestId: request.requestId, exception });
+    if (!(exception instanceof HttpException) && body.statusCode >= 500) {
+      observability().logger.error("unhandled api exception", { requestId: request.requestId, error: exception });
+      captureException(exception, { requestId: request.requestId });
     }
 
     response.status(body.statusCode).json(body);
@@ -82,6 +90,10 @@ function normalizeUnexpectedMessage(exception: unknown): string {
   if (exception instanceof Error && exception.message.trim()) return exception.message;
   if (typeof exception === "string" && exception.trim()) return exception;
   return genericUnexpectedMessage;
+}
+
+function isInvalidTextRepresentation(exception: unknown): boolean {
+  return typeof exception === "object" && exception !== null && (exception as { code?: unknown }).code === "22P02";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

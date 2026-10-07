@@ -24,3 +24,5 @@ pnpm verify
 - Add one WordPress site and run WordPress, Rank Math, and GSC tests.
 - Create one test article and move it through the workflow before enabling automatic publishing.
 - Confirm PostgreSQL backup policy is active.
+- Optional: set `SENTRY_DSN` and `METRICS_TOKEN` (see README → Monitoring) and add the suggested alerts.
+- Confirm the worker container is healthy (`docker compose ps`) and `/api/health/ready` shows `checks.worker`.

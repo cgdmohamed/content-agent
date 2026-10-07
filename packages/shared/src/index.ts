@@ -6,3 +6,5 @@ export * from "./schemas.js";
 export * from "./html-sanitizer.js";
 export * from "./url-safety.js";
 export * from "./models.js";
+export * from "./logger.js";
+export * from "./metrics.js";

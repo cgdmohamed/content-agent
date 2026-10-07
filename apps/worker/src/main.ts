@@ -1,6 +1,8 @@
 import { Queue, Worker } from "bullmq";
 import { Redis } from "ioredis";
 import { loadEnv } from "@content-agent/config";
+import { createLogger, workerHeartbeatIntervalMs, workerHeartbeatKey } from "@content-agent/shared";
+import { captureException, flushMonitoring, initMonitoring } from "@content-agent/shared/monitoring";
 import { closeDb, markJobCompleted, markJobFailed, markJobProvider, markJobRetrying, markJobStarted, query, setContentFailure } from "./db.js";
 import { processContentOperation, providerForOperationResult, syncGscForSite } from "./processors.js";
 import { hasRetriesLeft } from "./retry.js";
@@ -91,13 +93,41 @@ function nextPrimaryOperation(state: ContentState): ContentOperation | null {
 
 console.info("بدء تشغيل عامل وكيل المحتوى...");
 const env = loadEnv();
-console.info(`تم تحميل إعدادات العامل. عدد العمليات المتوازية: ${env.WORKER_CONCURRENCY}`);
+const logger = createLogger({
+  service: "worker",
+  format: env.LOG_FORMAT ?? (env.NODE_ENV === "production" ? "json" : "pretty"),
+  level: env.LOG_LEVEL
+});
+if (await initMonitoring({ dsn: env.SENTRY_DSN, service: "worker", environment: env.SENTRY_ENVIRONMENT })) logger.info("error tracking enabled");
+logger.info("worker configuration loaded", { concurrency: env.WORKER_CONCURRENCY });
 
 const connection = new Redis(env.REDIS_URL, {
   maxRetriesPerRequest: null
 });
 connection.on("error", (error) => {
-  console.error(`خطأ اتصال Redis في العامل: ${error.message}`);
+  logger.error("redis connection error", { error });
+});
+
+// The API reports worker liveness (health, metrics) and Docker's healthcheck reads this key.
+async function beat(): Promise<void> {
+  try {
+    await connection.set(workerHeartbeatKey, String(Date.now()), "PX", workerHeartbeatIntervalMs * 4);
+  } catch (error) {
+    logger.warn("heartbeat failed", { error });
+  }
+}
+void beat();
+const heartbeatTimer = setInterval(() => void beat(), workerHeartbeatIntervalMs);
+heartbeatTimer.unref();
+
+process.on("unhandledRejection", (reason) => {
+  logger.error("unhandled rejection", { error: reason });
+  captureException(reason, { source: "unhandledRejection" });
+});
+process.on("uncaughtException", (error) => {
+  logger.error("uncaught exception", { error });
+  captureException(error, { source: "uncaughtException" });
+  void flushMonitoring().finally(() => process.exit(1));
 });
 
 const workers: Worker[] = [];
@@ -113,7 +143,9 @@ for (const queueName of queueNames) {
       const contentItemId = String(job.data?.contentItemId ?? "");
       const siteId = String(job.data?.siteId ?? "");
       const bullJobId = String(job.id ?? `${operation}:${contentItemId}`);
+      const jobLog = logger.child({ jobId: bullJobId, queue: queueName, operation, contentItemId: contentItemId || undefined, siteId: siteId || undefined, attempt: job.attemptsMade + 1 });
       await markJobStarted(bullJobId);
+      jobLog.info("job started");
       try {
         if (operation === "SYNC_GSC") {
           if (!siteId) throw new Error("لا يوجد siteId في مهمة GSC.");
@@ -126,13 +158,17 @@ for (const queueName of queueNames) {
           await enqueueNextAutomatedStep(contentItemId, operation);
         }
         await markJobCompleted(bullJobId, Date.now() - startedAt);
+        jobLog.info("job completed", { durationMs: Date.now() - startedAt });
       } catch (error) {
         const message = error instanceof Error ? error.message : "خطأ غير معروف";
         if (hasRetriesLeft(job.attemptsMade, job.opts.attempts)) {
           // BullMQ will retry this job: keep the content item in its current state instead of showing FAILED.
           await markJobRetrying(bullJobId, message, Date.now() - startedAt);
+          jobLog.warn("job failed, will retry", { durationMs: Date.now() - startedAt, error });
         } else {
           await markJobFailed(bullJobId, message, Date.now() - startedAt);
+          jobLog.error("job failed permanently", { durationMs: Date.now() - startedAt, error });
+          captureException(error, { jobId: bullJobId, queue: queueName, operation, contentItemId });
           if (contentItemId) await setContentFailure(contentItemId, operation, message);
         }
         throw error;
@@ -140,13 +176,16 @@ for (const queueName of queueNames) {
     },
     { connection, concurrency: env.WORKER_CONCURRENCY }
   );
-  worker.on("failed", (job, error) => {
-    console.error(`فشلت المهمة ${job?.id ?? "غير معروفة"} في ${queueName}: ${error.message}`);
+  worker.on("error", (error) => {
+    logger.error("worker error", { queue: queueName, error });
+  });
+  worker.on("stalled", (jobId) => {
+    logger.warn("job stalled and will be re-queued", { queue: queueName, jobId });
   });
   workers.push(worker);
 }
 
-console.info(`عامل وكيل المحتوى جاهز للطوابير: ${queueNames.join(", ")}`);
+logger.info("worker ready", { queues: [...queueNames] });
 
 async function enqueueNextAutomatedStep(contentItemId: string, finishedOperation: string): Promise<void> {
   const result = await query<AutomationState>("SELECT status, mode, auto_publish FROM content_items WHERE id = $1", [contentItemId]);
@@ -226,11 +265,13 @@ function queueForOperation(operation: string): string {
 async function shutdown(signal: NodeJS.Signals): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
-  console.info(`إيقاف عامل وكيل المحتوى بسبب ${signal}...`);
+  logger.info("worker shutting down", { signal });
+  clearInterval(heartbeatTimer);
   await Promise.all(workers.map((worker) => worker.close()));
   await Promise.all([...queueClients.values()].map((queue) => queue.close()));
   await connection.quit();
   await closeDb();
+  await flushMonitoring();
   process.exit(0);
 }
 
