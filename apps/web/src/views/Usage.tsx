@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState, type ReactElement, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { api, type SiteUsageDto, type UsageOverviewDto, type UsageSiteRowDto } from "../api/client";
+import { api, type UsageOverviewDto, type UsageProviderRowDto, type UsageSiteRowDto } from "../api/client";
 import { providerLabels, usageOperationLabel } from "../ui/labels";
 import { EmptyState, ErrorState, LoadingState } from "../ui/StateViews";
 
@@ -29,6 +29,19 @@ export function budgetTone(spent: number, budget: number, hardLimit: number): "o
   if (budget > 0 && spent >= budget) return "danger";
   if (budget > 0 && spent >= budget * 0.8) return "warn";
   return "ok";
+}
+
+export type ReconcileStatus = "match" | "close" | "off";
+
+/** Compares what the app recorded with what the provider's invoice says, as a share of the invoice. */
+export function reconcile(estimatedUsd: number, invoiceUsd: number): { deltaUsd: number; ratio: number | null; status: ReconcileStatus } {
+  const deltaUsd = Number((estimatedUsd - invoiceUsd).toFixed(6));
+  if (invoiceUsd <= 0) return { deltaUsd, ratio: null, status: estimatedUsd <= 0.005 ? "match" : "off" };
+  const ratio = deltaUsd / invoiceUsd;
+  const size = Math.abs(ratio);
+  // Invoices round to cents, so tiny absolute differences always count as a match.
+  if (Math.abs(deltaUsd) <= 0.01 || size <= 0.05) return { deltaUsd, ratio, status: "match" };
+  return { deltaUsd, ratio, status: size <= 0.15 ? "close" : "off" };
 }
 
 export function Usage(): ReactElement {
@@ -72,6 +85,8 @@ export function Usage(): ReactElement {
         </div>
       </section>
 
+      <InvoiceReconciliation providers={data.byProvider} />
+
       <section className="rounded-lg border border-slate-200 bg-white p-5">
         <h3 className="font-semibold">المواقع</h3>
         {data.sites.length === 0 ? <EmptyState label="لا توجد مواقع." /> : <SitesTable sites={data.sites} selected={selected} onSelect={select} />}
@@ -79,6 +94,45 @@ export function Usage(): ReactElement {
 
       {selected ? <SiteUsagePanel siteId={selected} from={from} to={to} onClose={() => select(null)} /> : null}
     </div>
+  );
+}
+
+function InvoiceReconciliation(props: { providers: UsageProviderRowDto[] }): ReactElement | null {
+  const [invoices, setInvoices] = useState<Record<string, string>>({});
+  if (props.providers.length === 0) return null;
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-5">
+      <h3 className="font-semibold">مطابقة الفواتير</h3>
+      <p className="mt-1 text-xs text-slate-500">أدخل المبلغ الذي تظهره لوحة كل مزود لنفس الفترة لتعرف إن كان حساب النظام مطابقًا. الفرق الكبير يعني سعرًا غير صحيح لموديل (عدّله من الإعدادات → موديلات مخصصة) أو استخدامًا خارج النظام على نفس المفتاح.</p>
+      <div className="mt-3 overflow-x-auto">
+        <table className="w-full min-w-[640px] text-right text-sm">
+          <thead className="text-xs text-slate-500">
+            <tr><th className="py-2">المزود</th><th>حساب النظام</th><th>منه مأخوذ من المزود</th><th>التوكنات (دخل / خرج / كاش)</th><th>الفاتورة الفعلية $</th><th>الفرق</th></tr>
+          </thead>
+          <tbody>
+            {props.providers.map((row) => {
+              const raw = invoices[row.provider];
+              const result = raw !== undefined && raw !== "" && Number.isFinite(Number(raw)) ? reconcile(row.costUsd, Number(raw)) : null;
+              const tone = result?.status === "match" ? "text-teal" : result?.status === "close" ? "text-amber-700" : "text-red-600";
+              return (
+                <tr key={row.provider} className="border-t border-slate-100">
+                  <td className="py-2 font-medium">{providerLabels[row.provider] ?? row.provider}</td>
+                  <td>{usd(row.costUsd)}</td>
+                  <td className="text-slate-500">{row.reportedCostUsd > 0 ? usd(row.reportedCostUsd) : "—"}</td>
+                  <td className="text-xs text-slate-600">{count(row.inputTokens)} / {count(row.outputTokens)} / {count(row.cacheTokens)}</td>
+                  <td>
+                    <input type="number" min={0} step="0.01" inputMode="decimal" aria-label={`فاتورة ${providerLabels[row.provider] ?? row.provider}`} value={raw ?? ""} onChange={(event) => setInvoices({ ...invoices, [row.provider]: event.target.value })} className="w-24 rounded-md border border-slate-200 px-2 py-1 text-sm" />
+                  </td>
+                  <td className={result ? tone : "text-slate-400"}>
+                    {result ? `${result.deltaUsd >= 0 ? "+" : "−"}${usd(Math.abs(result.deltaUsd))}${result.ratio === null ? "" : ` (${Math.round(result.ratio * 100)}%)`} · ${result.status === "match" ? "مطابق" : result.status === "close" ? "قريب" : "غير مطابق"}` : "—"}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
@@ -171,7 +225,7 @@ function SiteUsagePanel(props: { siteId: string; from: string; to: string; onClo
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card label="الاستهلاك" value={usd(totals.costUsd)} hint={totals.unconfirmedCostUsd > 0 ? `منها ${usd(totals.unconfirmedCostUsd)} غير مؤكدة` : undefined} />
         <Card label="الاستدعاءات" value={count(totals.calls)} hint={`نجح ${count(totals.successfulCalls)} · فشل ${count(totals.failedCalls)}`} />
-        <Card label="التوكنات" value={count(totals.inputTokens + totals.outputTokens)} hint={`دخل ${count(totals.inputTokens)} · خرج ${count(totals.outputTokens)}`} />
+        <Card label="التوكنات" value={count(totals.inputTokens + totals.outputTokens + totals.cacheTokens)} hint={`دخل ${count(totals.inputTokens)} · خرج ${count(totals.outputTokens)}${totals.cacheTokens > 0 ? ` · كاش ${count(totals.cacheTokens)}` : ""}`} />
         <Card label="صور مولّدة" value={count(totals.images)} />
         <Card label="متوسط تكلفة المقال" value={totals.costPerArticleUsd === null ? "—" : usd(totals.costPerArticleUsd)} hint={`${count(totals.articlesWithUsage)} مقال`} />
         <Card label="تكلفة المقال المنشور" value={totals.costPerPublishedUsd === null ? "—" : usd(totals.costPerPublishedUsd)} />
@@ -209,7 +263,7 @@ function SiteUsagePanel(props: { siteId: string; from: string; to: string; onClo
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Table title="حسب العملية" head={["العملية", "استدعاءات", "فشل", "التكلفة"]} rows={data.byOperation.map((row) => [usageOperationLabel(row.operation), count(row.calls), count(row.failedCalls), usd(row.costUsd)])} />
-        <Table title="حسب الموديل" head={["الموديل", "استدعاءات", "توكنات", "التكلفة"]} rows={data.byModel.map((row) => [`${providerLabels[row.provider] ?? row.provider} · ${row.model}`, count(row.calls), count(row.inputTokens + row.outputTokens), usd(row.costUsd)])} />
+        <Table title="حسب الموديل" head={["الموديل", "استدعاءات", "توكنات", "التكلفة"]} rows={data.byModel.map((row) => [`${providerLabels[row.provider] ?? row.provider} · ${row.model}`, count(row.calls), count(row.inputTokens + row.outputTokens + row.cacheTokens), usd(row.costUsd)])} />
       </div>
 
       <div>

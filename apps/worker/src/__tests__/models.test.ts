@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { imageUsageFrom } from "../gemini-image.js";
 import { forgetImage, recallImage, rememberImage } from "../image-cache.js";
+import { parseAnthropicUsage, parseOpenAiStyleUsage } from "../ai.js";
 import { defaultModelChain, isProviderConfigured, operationKeyFor } from "../models.js";
 
 describe("default model chains", () => {
@@ -45,5 +46,21 @@ describe("image cache", () => {
     rememberImage("c2", "p", "m", image, 1000);
     forgetImage("c2", "p");
     expect(recallImage("c2", "p", 1500)).toBeNull();
+  });
+});
+
+describe("provider usage parsing", () => {
+  it("splits OpenAI cached tokens out of prompt_tokens so they are billed at the cached price", () => {
+    expect(parseOpenAiStyleUsage({ prompt_tokens: 1000, completion_tokens: 200, prompt_tokens_details: { cached_tokens: 600 } })).toEqual({ inputTokens: 400, outputTokens: 200, cacheReadTokens: 600 });
+    expect(parseOpenAiStyleUsage({ prompt_tokens: 10, completion_tokens: 5, prompt_tokens_details: { cached_tokens: 99 } })?.inputTokens).toBe(0); // never negative
+    expect(parseOpenAiStyleUsage(undefined)).toBeUndefined();
+  });
+
+  it("keeps the cost a provider reports (Perplexity usage.cost.total_cost)", () => {
+    expect(parseOpenAiStyleUsage({ prompt_tokens: 100, completion_tokens: 50, cost: { total_cost: 0.0123 } })?.reportedCostUsd).toBe(0.0123);
+  });
+
+  it("reads Anthropic cache reads/writes, which input_tokens already excludes", () => {
+    expect(parseAnthropicUsage({ input_tokens: 50, output_tokens: 20, cache_read_input_tokens: 900, cache_creation_input_tokens: 100 })).toEqual({ inputTokens: 50, outputTokens: 20, cacheReadTokens: 900, cacheWriteTokens: 100 });
   });
 });

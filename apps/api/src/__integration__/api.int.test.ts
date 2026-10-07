@@ -287,6 +287,10 @@ describe.skipIf(!enabled)("API over HTTP with real PostgreSQL and Redis", () => 
     expect(sites[0]!.siteId).toBe(siteB); // sorted by spend
     expect((overview.body.month as { costUsd: number }).costUsd).toBe(overview.body.totalCostUsd);
     expect((await api("/dashboard", { cookie: adminCookie })).body.monthlyAiSpend).toBe(overview.body.totalCostUsd);
+    // Per-provider totals (for invoice reconciliation) add up to the same global total.
+    const providers = overview.body.byProvider as Array<{ provider: string; costUsd: number }>;
+    expect(Number(providers.reduce((total, row) => total + row.costUsd, 0).toFixed(6))).toBe(overview.body.totalCostUsd);
+    expect(providers.find((row) => row.provider === "anthropic")?.costUsd).toBe(0.9); // every seeded row uses this provider
 
     expect((await api("/reports/sites/not-a-uuid/usage", { cookie: adminCookie })).status).toBe(400);
     expect((await api("/reports/sites/00000000-0000-4000-8000-000000000000/usage", { cookie: adminCookie })).status).toBe(404);

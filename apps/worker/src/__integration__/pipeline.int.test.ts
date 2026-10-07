@@ -173,4 +173,42 @@ describe.skipIf(!integrationEnabled)("worker pipeline against real PostgreSQL", 
     expect(images.rows[0]!.count).toBe(1);
     expect((await query("SELECT status FROM content_items WHERE id = $1", [contentId])).rows[0]!.status).toBe("IMAGE_READY");
   });
+
+  it("uses the cost the provider reports and stores cache token detail", async () => {
+    const siteId = await seedSite({ query });
+    const contentId = await seedContent({ query }, siteId);
+    mock = mockFetch((call) =>
+      call.url.hostname === "api.perplexity.ai"
+        ? json({
+            choices: [{ message: { content: ideasJson } }],
+            usage: { prompt_tokens: 150_000, completion_tokens: 14_218, prompt_tokens_details: { cached_tokens: 83_712 }, cost: { total_cost: 0.0349 } }
+          })
+        : undefined
+    );
+
+    await processContentOperation(contentId, "GENERATE_IDEAS");
+
+    const row = (await query("SELECT estimated_cost_usd::float AS cost, cost_source, input_tokens, output_tokens, cache_read_tokens FROM api_usage_logs")).rows[0]!;
+    expect(row).toMatchObject({ cost: 0.0349, cost_source: "reported", input_tokens: 66_288, output_tokens: 14_218, cache_read_tokens: 83_712 });
+  });
+
+  it("still bills the tokens of an image request that came back without an image", async () => {
+    const siteId = await seedSite({ query });
+    const contentId = await seedContent({ query }, siteId, { status: "REVIEWED" });
+    await query("UPDATE content_items SET title = 'عنوان', image_prompt = 'blocked prompt' WHERE id = $1", [contentId]);
+    await query("INSERT INTO system_settings (key, value) VALUES ('production_settings', $1::jsonb)", [JSON.stringify({ operationModels: { image: [{ provider: "gemini", model: "gemini-3-pro-image-preview" }] } })]);
+    mock = mockFetch((call) =>
+      call.url.hostname === "generativelanguage.googleapis.com"
+        ? json({ candidates: [{ content: { parts: [{ text: "I cannot create that image." }] } }], usageMetadata: { promptTokenCount: 100, candidatesTokensDetails: [{ modality: "TEXT", tokenCount: 400 }], thoughtsTokenCount: 100 } })
+        : undefined
+    );
+
+    await expect(processContentOperation(contentId, "GENERATE_IMAGE")).rejects.toThrow();
+
+    const row = (await query("SELECT success, error, estimated_cost_usd::float AS cost FROM api_usage_logs WHERE operation = 'GENERATE_IMAGE'")).rows[0]!;
+    expect(row.success).toBe(false);
+    expect(row.error).not.toBe("RESERVED");
+    expect(row.cost).toBeCloseTo((100 * 2 + 500 * 12) / 1_000_000, 6); // prompt tokens + text + thinking tokens
+  });
 });
+

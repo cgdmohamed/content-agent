@@ -57,14 +57,37 @@ export async function reserveSpend(reservation: SpendReservation): Promise<strin
 
 export async function settleSpend(
   id: string,
-  result: { inputTokens: number; outputTokens: number; costUsd: number; durationMs: number }
+  result: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+    costUsd: number;
+    /** "reported" when the provider returned its own cost, "estimated" when computed from tokens and configured prices. */
+    costSource?: "reported" | "estimated";
+    durationMs: number;
+  }
 ): Promise<void> {
   await query(
     `UPDATE api_usage_logs
      SET input_tokens = $2, output_tokens = $3, estimated_cost_usd = $4, duration_ms = $5, success = true, error = NULL,
+         cache_read_tokens = $6, cache_write_tokens = $7, cost_source = $8,
          content_label = COALESCE((SELECT COALESCE(c.title, c.topic) FROM content_items c WHERE c.id = api_usage_logs.content_item_id), content_label)
      WHERE id = $1`,
-    [id, result.inputTokens, result.outputTokens, result.costUsd, result.durationMs]
+    [id, result.inputTokens, result.outputTokens, result.costUsd, result.durationMs, result.cacheReadTokens ?? 0, result.cacheWriteTokens ?? 0, result.costSource ?? "estimated"]
+  );
+}
+
+/**
+ * The provider answered (HTTP 200) but the result was unusable, e.g. a blocked image or text instead of an image.
+ * It still consumed tokens, so the call keeps its real cost and is recorded as failed.
+ */
+export async function billFailedCall(id: string, failure: { inputTokens: number; outputTokens: number; costUsd: number; durationMs: number; error: string }): Promise<void> {
+  await query(
+    `UPDATE api_usage_logs
+     SET input_tokens = $2, output_tokens = $3, estimated_cost_usd = $4, duration_ms = $5, success = false, error = $6
+     WHERE id = $1`,
+    [id, failure.inputTokens, failure.outputTokens, failure.costUsd, failure.durationMs, failure.error]
   );
 }
 

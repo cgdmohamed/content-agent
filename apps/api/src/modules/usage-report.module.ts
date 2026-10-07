@@ -54,6 +54,7 @@ class UsageReportController {
               COALESCE(u.images, 0)::text AS images,
               COALESCE(u.input_tokens, 0)::text AS input_tokens,
               COALESCE(u.output_tokens, 0)::text AS output_tokens,
+              COALESCE(u.cache_tokens, 0)::text AS cache_tokens,
               (SELECT COUNT(*) FROM content_items c WHERE c.site_id = s.id AND c.created_at >= $1 AND c.created_at < $2)::text AS created,
               (SELECT COUNT(*) FROM content_items c WHERE c.site_id = s.id AND c.published_at >= $1 AND c.published_at < $2)::text AS published
        FROM sites s
@@ -65,7 +66,8 @@ class UsageReportController {
                 COUNT(*) FILTER (WHERE NOT success AND COALESCE(error, '') NOT IN ${UNCONFIRMED}) AS failed,
                 COUNT(*) FILTER (WHERE success AND operation = 'GENERATE_IMAGE') AS images,
                 SUM(input_tokens) AS input_tokens,
-                SUM(output_tokens) AS output_tokens
+                SUM(output_tokens) AS output_tokens,
+                SUM(cache_read_tokens + cache_write_tokens) AS cache_tokens
          FROM api_usage_logs
          WHERE created_at >= $1 AND created_at < $2
          GROUP BY site_id
@@ -84,9 +86,28 @@ class UsageReportController {
        FROM api_usage_logs WHERE created_at >= $1 AND created_at < $2`,
       params
     );
+    // What each provider should show on its invoice for the period, to reconcile against the real bills.
+    const providers = await this.db.query<Record<string, string>>(
+      `SELECT provider, SUM(estimated_cost_usd)::text AS cost, COUNT(*)::text AS calls,
+              COALESCE(SUM(input_tokens), 0)::text AS input_tokens, COALESCE(SUM(output_tokens), 0)::text AS output_tokens,
+              COALESCE(SUM(cache_read_tokens + cache_write_tokens), 0)::text AS cache_tokens,
+              COALESCE(SUM(estimated_cost_usd) FILTER (WHERE cost_source = 'reported'), 0)::text AS reported
+       FROM api_usage_logs WHERE created_at >= $1 AND created_at < $2
+       GROUP BY provider ORDER BY SUM(estimated_cost_usd) DESC, provider`,
+      params
+    );
     return {
       from: day(range.from),
       to: day(range.toInclusive),
+      byProvider: providers.rows.map((row) => ({
+        provider: row.provider,
+        costUsd: money(row.cost),
+        reportedCostUsd: money(row.reported),
+        calls: Number(row.calls),
+        inputTokens: Number(row.input_tokens),
+        outputTokens: Number(row.output_tokens),
+        cacheTokens: Number(row.cache_tokens)
+      })),
       totalCostUsd: money(total.rows[0]?.cost),
       totalCalls: Number(total.rows[0]?.calls ?? 0),
       unattributedCostUsd: money(unattributed.rows[0]?.cost),
@@ -106,6 +127,7 @@ class UsageReportController {
           images: Number(row.images),
           inputTokens: Number(row.input_tokens),
           outputTokens: Number(row.output_tokens),
+          cacheTokens: Number(row.cache_tokens),
           contentCreated: Number(row.created),
           contentPublished: published,
           costPerPublishedUsd: published > 0 ? money(cost / published) : null,
@@ -134,6 +156,8 @@ class UsageReportController {
                 COUNT(*) FILTER (WHERE NOT success AND COALESCE(error, '') NOT IN ${UNCONFIRMED})::text AS failed,
                 COALESCE(SUM(input_tokens), 0)::text AS input_tokens,
                 COALESCE(SUM(output_tokens), 0)::text AS output_tokens,
+                COALESCE(SUM(cache_read_tokens + cache_write_tokens), 0)::text AS cache_tokens,
+                COALESCE(SUM(estimated_cost_usd) FILTER (WHERE cost_source = 'reported'), 0)::text AS reported,
                 COUNT(*) FILTER (WHERE success AND operation = 'GENERATE_IMAGE')::text AS images,
                 COUNT(DISTINCT content_item_id)::text AS articles
          ${scope}`,
@@ -151,7 +175,8 @@ class UsageReportController {
       ),
       this.db.query<Record<string, string>>(
         `SELECT provider, model, COUNT(*)::text AS calls, SUM(estimated_cost_usd)::text AS cost,
-                COALESCE(SUM(input_tokens), 0)::text AS input_tokens, COALESCE(SUM(output_tokens), 0)::text AS output_tokens
+                COALESCE(SUM(input_tokens), 0)::text AS input_tokens, COALESCE(SUM(output_tokens), 0)::text AS output_tokens,
+                COALESCE(SUM(cache_read_tokens + cache_write_tokens), 0)::text AS cache_tokens
          ${scope} GROUP BY provider, model ORDER BY SUM(estimated_cost_usd) DESC, provider, model`,
         params
       ),
@@ -233,6 +258,8 @@ class UsageReportController {
         failedCalls: Number(t.failed),
         inputTokens: Number(t.input_tokens),
         outputTokens: Number(t.output_tokens),
+        cacheTokens: Number(t.cache_tokens),
+        reportedCostUsd: money(t.reported),
         images: Number(t.images),
         articlesWithUsage: articles,
         costPerArticleUsd: articles > 0 ? money(cost / articles) : null,
@@ -263,7 +290,8 @@ class UsageReportController {
         calls: Number(row.calls),
         costUsd: money(row.cost),
         inputTokens: Number(row.input_tokens),
-        outputTokens: Number(row.output_tokens)
+        outputTokens: Number(row.output_tokens),
+        cacheTokens: Number(row.cache_tokens)
       })),
       byDay: byDay.rows.map((row) => ({ date: row.day, costUsd: money(row.cost), calls: Number(row.calls) })),
       topContent: topContent.rows.map((row) => ({

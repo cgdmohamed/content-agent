@@ -10,7 +10,7 @@ export function Settings(): ReactElement {
   const [saved, setSaved] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [customModels, setCustomModels] = useState<ModelSpecDto[] | null>(null);
-  const [draft, setDraft] = useState({ provider: "openai", kind: "text", model: "", label: "", inputPerM: "", outputPerM: "", imageUsd: "", imageOutputPerM: "" });
+  const [draft, setDraft] = useState({ provider: "openai", kind: "text", model: "", label: "", inputPerM: "", outputPerM: "", imageUsd: "", imageOutputPerM: "", cachedInputPerM: "", cacheWritePerM: "", requestUsd: "" });
   const updateSettings = useMutation({
     meta: { successMessage: "تم حفظ الإعدادات" },
     mutationFn: api.updateSettings,
@@ -39,11 +39,22 @@ export function Settings(): ReactElement {
       custom: true,
       providerConfigured: true,
       ...(isImage
-        ? { imageUsd: Number(draft.imageUsd), ...(draft.imageOutputPerM !== "" ? { imageOutputPerM: Number(draft.imageOutputPerM) } : {}) }
-        : { inputPerM: Number(draft.inputPerM), outputPerM: Number(draft.outputPerM) })
+        ? {
+            imageUsd: Number(draft.imageUsd),
+            ...(draft.imageOutputPerM !== "" ? { imageOutputPerM: Number(draft.imageOutputPerM) } : {}),
+            ...(draft.inputPerM !== "" ? { inputPerM: Number(draft.inputPerM) } : {}),
+            ...(draft.outputPerM !== "" ? { outputPerM: Number(draft.outputPerM) } : {})
+          }
+        : {
+            inputPerM: Number(draft.inputPerM),
+            outputPerM: Number(draft.outputPerM),
+            ...(draft.cachedInputPerM !== "" ? { cachedInputPerM: Number(draft.cachedInputPerM) } : {}),
+            ...(draft.cacheWritePerM !== "" ? { cacheWritePerM: Number(draft.cacheWritePerM) } : {}),
+            ...(draft.requestUsd !== "" ? { requestUsd: Number(draft.requestUsd) } : {})
+          })
     };
     setCustomModels([...custom.filter((item) => !(item.provider === spec.provider && item.model === spec.model)), spec]);
-    setDraft({ ...draft, model: "", label: "", inputPerM: "", outputPerM: "", imageUsd: "", imageOutputPerM: "" });
+    setDraft({ ...draft, model: "", label: "", inputPerM: "", outputPerM: "", imageUsd: "", imageOutputPerM: "", cachedInputPerM: "", cacheWritePerM: "", requestUsd: "" });
   }
 
   function submit(event: FormEvent<HTMLFormElement>): void {
@@ -64,7 +75,7 @@ export function Settings(): ReactElement {
       defaultMarket: String(data.get("defaultMarket") ?? "SA"),
       autoPublishAfterApproval: data.get("autoPublishAfterApproval") === "on",
       operationModels: readOperationModels(data, "model", settings.data!.modelOperations, settings.data!.modelCatalog),
-      customModels: custom.map(({ provider, model, label, kind, inputPerM, outputPerM, imageUsd, imageOutputPerM }) => ({ provider, model, label, kind, inputPerM, outputPerM, imageUsd, imageOutputPerM })),
+      customModels: custom.map(({ provider, model, label, kind, inputPerM, outputPerM, imageUsd, imageOutputPerM, cachedInputPerM, cacheWritePerM, requestUsd }) => ({ provider, model, label, kind, inputPerM, outputPerM, imageUsd, imageOutputPerM, cachedInputPerM, cacheWritePerM, requestUsd })),
       imageSize: (String(data.get("imageSize") ?? "") as "" | "1K" | "2K" | "4K")
     });
   }
@@ -132,11 +143,16 @@ export function Settings(): ReactElement {
               <>
                 <label><span className="text-xs text-slate-500">سعر الدخل $/مليون</span><input type="number" min={0} step="0.01" value={draft.inputPerM} onChange={(event) => setDraft({ ...draft, inputPerM: event.target.value })} className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm" /></label>
                 <label><span className="text-xs text-slate-500">سعر الخرج $/مليون</span><input type="number" min={0} step="0.01" value={draft.outputPerM} onChange={(event) => setDraft({ ...draft, outputPerM: event.target.value })} className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm" /></label>
+                <label><span className="text-xs text-slate-500">قراءة الكاش $/مليون (اختياري)</span><input type="number" min={0} step="0.001" value={draft.cachedInputPerM} onChange={(event) => setDraft({ ...draft, cachedInputPerM: event.target.value })} className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm" /></label>
+                <label><span className="text-xs text-slate-500">كتابة الكاش $/مليون (اختياري)</span><input type="number" min={0} step="0.001" value={draft.cacheWritePerM} onChange={(event) => setDraft({ ...draft, cacheWritePerM: event.target.value })} className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm" /></label>
+                <label><span className="text-xs text-slate-500">رسم ثابت لكل طلب $ (اختياري)</span><input type="number" min={0} step="0.001" value={draft.requestUsd} onChange={(event) => setDraft({ ...draft, requestUsd: event.target.value })} className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm" /></label>
               </>
             ) : (
               <>
                 <label><span className="text-xs text-slate-500">سعر الصورة $</span><input type="number" min={0} step="0.001" value={draft.imageUsd} onChange={(event) => setDraft({ ...draft, imageUsd: event.target.value })} className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm" /></label>
                 <label><span className="text-xs text-slate-500">سعر توكن الصورة $/مليون (اختياري)</span><input type="number" min={0} step="0.01" value={draft.imageOutputPerM} onChange={(event) => setDraft({ ...draft, imageOutputPerM: event.target.value })} className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm" /></label>
+                <label><span className="text-xs text-slate-500">نص الإدخال $/مليون (اختياري)</span><input type="number" min={0} step="0.01" value={draft.inputPerM} onChange={(event) => setDraft({ ...draft, inputPerM: event.target.value })} className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm" /></label>
+                <label><span className="text-xs text-slate-500">نص/تفكير الخرج $/مليون (اختياري)</span><input type="number" min={0} step="0.01" value={draft.outputPerM} onChange={(event) => setDraft({ ...draft, outputPerM: event.target.value })} className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm" /></label>
               </>
             )}
             <div className="flex items-end"><button type="button" onClick={addCustomModel} className="rounded-md border border-teal px-3 py-2 text-sm font-semibold text-teal">إضافة</button></div>

@@ -13,9 +13,15 @@ export interface ModelRef {
 export interface ModelSpec extends ModelRef {
   label: string;
   kind: ModelKind;
-  /** USD per 1M tokens (text models). */
+  /** USD per 1M tokens (text models; for image models these are the prices of the text/thinking tokens). */
   inputPerM?: number;
   outputPerM?: number;
+  /** USD per 1M input tokens served from the provider's prompt cache (defaults to inputPerM). */
+  cachedInputPerM?: number;
+  /** USD per 1M input tokens written to the cache (defaults to inputPerM). */
+  cacheWritePerM?: number;
+  /** Flat USD charged per request on top of tokens (e.g. web-search fees), used when the provider reports no cost. */
+  requestUsd?: number;
   /** Flat USD per generated image (image models); used to reserve budget and as the settled cost when tokens are not reported. */
   imageUsd?: number;
   /** USD per 1M image output tokens; when set and the API reports usage, the real cost is computed from tokens. */
@@ -39,17 +45,17 @@ export const modelProviders: ModelProvider[] = ["anthropic", "openai", "perplexi
 
 // Prices are list prices at the time of writing; override or add models from Settings when they change.
 export const builtinModels: ModelSpec[] = [
-  { provider: "anthropic", model: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5", kind: "text", inputPerM: 1, outputPerM: 5 },
-  { provider: "anthropic", model: "claude-3-5-sonnet-latest", label: "Claude 3.5 Sonnet", kind: "text", inputPerM: 3, outputPerM: 15 },
-  { provider: "anthropic", model: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", kind: "text", inputPerM: 3, outputPerM: 15, estimated: true },
-  { provider: "openai", model: "gpt-4o-mini", label: "GPT-4o mini", kind: "text", inputPerM: 0.15, outputPerM: 0.6 },
-  { provider: "openai", model: "gpt-4.1-mini", label: "GPT-4.1 mini", kind: "text", inputPerM: 0.4, outputPerM: 1.6 },
-  { provider: "openai", model: "gpt-4o", label: "GPT-4o", kind: "text", inputPerM: 2.5, outputPerM: 10 },
-  { provider: "openai", model: "gpt-4.1", label: "GPT-4.1", kind: "text", inputPerM: 2, outputPerM: 8 },
+  { provider: "anthropic", model: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5", kind: "text", inputPerM: 1, outputPerM: 5, cachedInputPerM: 0.1, cacheWritePerM: 1.25 },
+  { provider: "anthropic", model: "claude-3-5-sonnet-latest", label: "Claude 3.5 Sonnet", kind: "text", inputPerM: 3, outputPerM: 15, cachedInputPerM: 0.3, cacheWritePerM: 3.75 },
+  { provider: "anthropic", model: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", kind: "text", inputPerM: 3, outputPerM: 15, cachedInputPerM: 0.3, cacheWritePerM: 3.75, estimated: true },
+  { provider: "openai", model: "gpt-4o-mini", label: "GPT-4o mini", kind: "text", inputPerM: 0.15, outputPerM: 0.6, cachedInputPerM: 0.075 },
+  { provider: "openai", model: "gpt-4.1-mini", label: "GPT-4.1 mini", kind: "text", inputPerM: 0.4, outputPerM: 1.6, cachedInputPerM: 0.1 },
+  { provider: "openai", model: "gpt-4o", label: "GPT-4o", kind: "text", inputPerM: 2.5, outputPerM: 10, cachedInputPerM: 1.25 },
+  { provider: "openai", model: "gpt-4.1", label: "GPT-4.1", kind: "text", inputPerM: 2, outputPerM: 8, cachedInputPerM: 0.5 },
   { provider: "perplexity", model: "sonar", label: "Sonar", kind: "text", inputPerM: 1, outputPerM: 1 },
   { provider: "perplexity", model: "sonar-pro", label: "Sonar Pro", kind: "text", inputPerM: 3, outputPerM: 15 },
-  { provider: "gemini", model: "gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image", kind: "image", imageUsd: 0.039, imageOutputPerM: 30 },
-  { provider: "gemini", model: "gemini-3-pro-image-preview", label: "Gemini 3 Pro Image", kind: "image", imageUsd: 0.134, imageOutputPerM: 120 },
+  { provider: "gemini", model: "gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image", kind: "image", imageUsd: 0.039, imageOutputPerM: 30, inputPerM: 0.3, outputPerM: 2.5 },
+  { provider: "gemini", model: "gemini-3-pro-image-preview", label: "Gemini 3 Pro Image (Nano Banana Pro)", kind: "image", imageUsd: 0.134, imageOutputPerM: 120, inputPerM: 2, outputPerM: 12 },
   // Observed bill: 8 images cost 0.82 USD (~0.10 each) with this model, so the old flat 0.04 under-counted the budget.
   { provider: "gemini", model: "gemini-3.1-flash-image", label: "Gemini 3.1 Flash Image", kind: "image", imageUsd: 0.1, estimated: true }
 ];
@@ -100,10 +106,20 @@ export function parseCustomModel(value: unknown): ModelSpec {
     spec.inputPerM = nonNegative(raw.inputPerM);
     spec.outputPerM = nonNegative(raw.outputPerM);
     if (spec.inputPerM === undefined || spec.outputPerM === undefined) throw new Error("سعر الإدخال والإخراج لكل مليون توكن مطلوب.");
+    const cached = nonNegative(raw.cachedInputPerM);
+    const written = nonNegative(raw.cacheWritePerM);
+    const perRequest = nonNegative(raw.requestUsd);
+    if (cached !== undefined) spec.cachedInputPerM = cached;
+    if (written !== undefined) spec.cacheWritePerM = written;
+    if (perRequest !== undefined) spec.requestUsd = perRequest;
   } else {
     spec.imageUsd = nonNegative(raw.imageUsd);
     spec.imageOutputPerM = nonNegative(raw.imageOutputPerM);
     if (spec.imageUsd === undefined) throw new Error("سعر الصورة الواحدة مطلوب.");
+    const textIn = nonNegative(raw.inputPerM);
+    const textOut = nonNegative(raw.outputPerM);
+    if (textIn !== undefined) spec.inputPerM = textIn;
+    if (textOut !== undefined) spec.outputPerM = textOut;
   }
   return spec;
 }
@@ -170,17 +186,66 @@ export function textCostUsd(spec: Pick<ModelSpec, "inputPerM" | "outputPerM"> | 
   return Number(((inputTokens / 1_000_000) * input + (outputTokens / 1_000_000) * output).toFixed(6));
 }
 
+/**
+ * What a text call consumed, normalized across providers:
+ * `inputTokens` are the tokens billed at the normal input price (OpenAI's cached tokens are already subtracted
+ * from prompt_tokens; Anthropic reports cache tokens separately), cache tokens are billed at their own prices.
+ */
+export interface TextUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  /** Total cost reported by the provider itself (e.g. Perplexity's usage.cost.total_cost); authoritative when present. */
+  reportedCostUsd?: number;
+}
+
+export interface CostResult {
+  costUsd: number;
+  source: "reported" | "estimated";
+}
+
+export function textCostFromUsage(
+  spec: Pick<ModelSpec, "inputPerM" | "outputPerM" | "cachedInputPerM" | "cacheWritePerM" | "requestUsd"> | undefined,
+  fallback: { input: number; output: number },
+  usage: TextUsage
+): CostResult {
+  if (usage.reportedCostUsd !== undefined && Number.isFinite(usage.reportedCostUsd) && usage.reportedCostUsd >= 0) {
+    return { costUsd: Number(usage.reportedCostUsd.toFixed(6)), source: "reported" };
+  }
+  const input = spec?.inputPerM ?? fallback.input;
+  const output = spec?.outputPerM ?? fallback.output;
+  const cached = spec?.cachedInputPerM ?? input;
+  const written = spec?.cacheWritePerM ?? input;
+  const tokens =
+    usage.inputTokens * input + (usage.cacheReadTokens ?? 0) * cached + (usage.cacheWriteTokens ?? 0) * written + usage.outputTokens * output;
+  return { costUsd: Number((tokens / 1_000_000 + (spec?.requestUsd ?? 0)).toFixed(6)), source: "estimated" };
+}
+
 export interface ImageUsage {
   imageOutputTokens?: number;
   textInputTokens?: number;
+  /** Text and thinking tokens the model produced besides the image. */
   textOutputTokens?: number;
 }
 
-/** Real cost from reported tokens when the spec has a token price; otherwise the flat per-image price. */
-export function imageCostFromUsage(spec: Pick<ModelSpec, "imageUsd" | "imageOutputPerM"> | undefined, fallbackUsd: number, usage?: ImageUsage): number {
+/**
+ * Real cost from reported tokens when the spec has a token price: image tokens at the image rate plus the text
+ * tokens (prompt and thinking) at the text rates, as the provider bills them. Otherwise the flat per-image price.
+ */
+export function imageCostFromUsage(spec: Pick<ModelSpec, "imageUsd" | "imageOutputPerM" | "inputPerM" | "outputPerM"> | undefined, fallbackUsd: number, usage?: ImageUsage): number {
   const flat = spec?.imageUsd ?? fallbackUsd;
   if (spec?.imageOutputPerM && usage?.imageOutputTokens && usage.imageOutputTokens > 0) {
-    return Number(((usage.imageOutputTokens / 1_000_000) * spec.imageOutputPerM).toFixed(6));
+    const image = usage.imageOutputTokens * spec.imageOutputPerM;
+    const text = (usage.textInputTokens ?? 0) * (spec.inputPerM ?? 0) + (usage.textOutputTokens ?? 0) * (spec.outputPerM ?? 0);
+    return Number(((image + text) / 1_000_000).toFixed(6));
   }
   return flat;
+}
+
+/** A response that carried no image (blocked, text-only) can still be billed for the tokens it used. */
+export function imageFailureCostFromUsage(spec: Pick<ModelSpec, "inputPerM" | "outputPerM"> | undefined, usage?: ImageUsage): number {
+  if (!usage) return 0;
+  const text = (usage.textInputTokens ?? 0) * (spec?.inputPerM ?? 0) + (usage.textOutputTokens ?? 0) * (spec?.outputPerM ?? 0);
+  return Number((text / 1_000_000).toFixed(6));
 }

@@ -59,6 +59,9 @@ export interface ModelSpecDto extends ModelRefDto {
   outputPerM?: number;
   imageUsd?: number;
   imageOutputPerM?: number;
+  cachedInputPerM?: number;
+  cacheWritePerM?: number;
+  requestUsd?: number;
   custom?: boolean;
   estimated?: boolean;
   providerConfigured: boolean;
@@ -245,10 +248,21 @@ export interface UsageSiteRowDto {
   images: number;
   inputTokens: number;
   outputTokens: number;
+  cacheTokens: number;
   contentCreated: number;
   contentPublished: number;
   costPerPublishedUsd: number | null;
   shareOfTotal: number;
+}
+
+export interface UsageProviderRowDto {
+  provider: string;
+  costUsd: number;
+  reportedCostUsd: number;
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheTokens: number;
 }
 
 export interface UsageOverviewDto {
@@ -259,6 +273,7 @@ export interface UsageOverviewDto {
   unattributedCostUsd: number;
   unattributedCalls: number;
   month: { costUsd: number; budgetUsd: number; hardLimitUsd: number };
+  byProvider: UsageProviderRowDto[];
   sites: UsageSiteRowDto[];
 }
 
@@ -278,6 +293,8 @@ export interface SiteUsageDto {
     failedCalls: number;
     inputTokens: number;
     outputTokens: number;
+    cacheTokens: number;
+    reportedCostUsd: number;
     images: number;
     articlesWithUsage: number;
     costPerArticleUsd: number | null;
@@ -294,7 +311,7 @@ export interface SiteUsageDto {
     jobsCancelled: number;
   };
   byOperation: Array<{ operation: string; calls: number; successfulCalls: number; failedCalls: number; costUsd: number; inputTokens: number; outputTokens: number }>;
-  byModel: Array<{ provider: string; model: string; calls: number; costUsd: number; inputTokens: number; outputTokens: number }>;
+  byModel: Array<{ provider: string; model: string; calls: number; costUsd: number; inputTokens: number; outputTokens: number; cacheTokens: number }>;
   byDay: Array<{ date: string; costUsd: number; calls: number }>;
   topContent: Array<{ contentItemId: string | null; label: string; status: string | null; deleted: boolean; costUsd: number; calls: number }>;
   recentActivity: Array<{ id: string; eventType: string; message: string; createdAt: string; contentItemId: string | null; actor: string | null }>;

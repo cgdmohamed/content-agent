@@ -6,9 +6,22 @@ export interface GeneratedImage {
   usage?: ImageUsage;
 }
 
+/** The call succeeded (HTTP 200) but returned no image; the tokens it used are still billed. */
+export class ImageNotReturnedError extends Error {
+  constructor(
+    message: string,
+    readonly usage: ImageUsage | undefined
+  ) {
+    super(message);
+    this.name = "ImageNotReturnedError";
+  }
+}
+
 export interface GeminiUsageMetadata {
   promptTokenCount?: number;
   candidatesTokenCount?: number;
+  /** Thinking tokens, billed at the text output price. */
+  thoughtsTokenCount?: number;
   candidatesTokensDetails?: Array<{ modality?: string; tokenCount?: number }>;
 }
 
@@ -17,7 +30,7 @@ export function imageUsageFrom(metadata: GeminiUsageMetadata | undefined): Image
   if (!metadata) return undefined;
   const imageOutputTokens = metadata.candidatesTokensDetails?.find((detail) => detail.modality?.toUpperCase() === "IMAGE")?.tokenCount;
   const textOutputTokens = metadata.candidatesTokensDetails?.find((detail) => detail.modality?.toUpperCase() === "TEXT")?.tokenCount;
-  return { imageOutputTokens, textInputTokens: metadata.promptTokenCount, textOutputTokens };
+  return { imageOutputTokens, textInputTokens: metadata.promptTokenCount, textOutputTokens: (textOutputTokens ?? 0) + (metadata.thoughtsTokenCount ?? 0) || undefined };
 }
 
 export async function generateGeminiImage(prompt: string, options: { model: string; imageSize?: ImageSize | null }): Promise<GeneratedImage> {
@@ -62,5 +75,5 @@ export async function generateGeminiImage(prompt: string, options: { model: stri
       }
     }
   }
-  throw new Error("لم يرجع Gemini صورة ضمن الرد.");
+  throw new ImageNotReturnedError("لم يرجع Gemini صورة ضمن الرد.", imageUsageFrom(data.usageMetadata));
 }

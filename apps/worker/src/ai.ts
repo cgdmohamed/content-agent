@@ -1,4 +1,4 @@
-import { findModel, textCostUsd, type ModelProvider } from "@content-agent/shared";
+import { findModel, textCostFromUsage, textCostUsd, type ModelProvider, type TextUsage } from "@content-agent/shared";
 import { effectiveHardLimit, isBudgetExceeded, ratesFor, estimateTokens, type PricedProvider } from "./budget.js";
 import { operationKeyFor, providerKey, resolveChainForContent, sanitizeProviderChain } from "./models.js";
 import { releaseSpend, reserveSpend, settleSpend } from "./usage.js";
@@ -26,9 +26,40 @@ export interface GenerateTextResult {
 
 interface ProviderCompletion {
   text: string;
-  /** Real token usage reported by the provider, when present. */
-  inputTokens?: number;
-  outputTokens?: number;
+  /** Real usage reported by the provider, when present (cache tokens and provider-reported cost included). */
+  usage?: TextUsage;
+}
+
+interface OpenAiStyleUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  prompt_tokens_details?: { cached_tokens?: number };
+  /** Perplexity reports what the call actually cost, including per-request search fees. */
+  cost?: { total_cost?: number };
+}
+
+/** OpenAI/Perplexity count cached tokens inside prompt_tokens; split them out so each is billed at its own price. */
+export function parseOpenAiStyleUsage(usage: OpenAiStyleUsage | undefined): TextUsage | undefined {
+  if (!usage || (usage.prompt_tokens === undefined && usage.completion_tokens === undefined)) return undefined;
+  const cached = Math.min(usage.prompt_tokens ?? 0, usage.prompt_tokens_details?.cached_tokens ?? 0);
+  const reported = usage.cost?.total_cost;
+  return {
+    inputTokens: Math.max(0, (usage.prompt_tokens ?? 0) - cached),
+    outputTokens: usage.completion_tokens ?? 0,
+    cacheReadTokens: cached,
+    ...(typeof reported === "number" ? { reportedCostUsd: reported } : {})
+  };
+}
+
+/** Anthropic's input_tokens already excludes cache reads and writes, which are reported separately. */
+export function parseAnthropicUsage(usage: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number } | undefined): TextUsage | undefined {
+  if (!usage || (usage.input_tokens === undefined && usage.output_tokens === undefined)) return undefined;
+  return {
+    inputTokens: usage.input_tokens ?? 0,
+    outputTokens: usage.output_tokens ?? 0,
+    cacheReadTokens: usage.cache_read_input_tokens ?? 0,
+    cacheWriteTokens: usage.cache_creation_input_tokens ?? 0
+  };
 }
 
 const callers: Record<TextProviderName, (prompt: string, maxTokens: number, key: string, model: string) => Promise<ProviderCompletion>> = {
@@ -60,10 +91,25 @@ export async function generateText(input: GenerateTextInput): Promise<GenerateTe
     try {
       const completion = await callers[ref.provider](input.prompt, maxTokens, providerKey(ref.provider as ModelProvider)!, ref.model);
       const durationMs = Date.now() - started;
-      const inputTokens = completion.inputTokens ?? promptTokens;
-      const outputTokens = completion.outputTokens ?? estimateTokens(completion.text);
-      await settleSpend(reservationId, { inputTokens, outputTokens, costUsd: textCostUsd(spec, rates, inputTokens, outputTokens), durationMs });
-      return { provider: ref.provider, model: ref.model, text: completion.text, inputTokens, outputTokens, durationMs };
+      const usage: TextUsage = completion.usage ?? { inputTokens: promptTokens, outputTokens: estimateTokens(completion.text) };
+      const cost = textCostFromUsage(spec, rates, usage);
+      await settleSpend(reservationId, {
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        cacheReadTokens: usage.cacheReadTokens ?? 0,
+        cacheWriteTokens: usage.cacheWriteTokens ?? 0,
+        costUsd: cost.costUsd,
+        costSource: cost.source,
+        durationMs
+      });
+      return {
+        provider: ref.provider,
+        model: ref.model,
+        text: completion.text,
+        inputTokens: usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0),
+        outputTokens: usage.outputTokens,
+        durationMs
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : "خطأ غير معروف";
       failures.push(`${ref.provider}/${ref.model}: ${message}`);
@@ -88,11 +134,7 @@ async function callOpenAI(prompt: string, maxTokens: number, key: string, model:
   });
   const data = (await response.json()) as ChatCompletionResponse;
   if (!response.ok) throw new Error(`فشل اتصال OpenAI برمز ${response.status}.`);
-  return {
-    text: data.choices?.[0]?.message?.content ?? "",
-    inputTokens: data.usage?.prompt_tokens,
-    outputTokens: data.usage?.completion_tokens
-  };
+  return { text: data.choices?.[0]?.message?.content ?? "", usage: parseOpenAiStyleUsage(data.usage) };
 }
 
 async function callPerplexity(prompt: string, maxTokens: number, key: string, model: string): Promise<ProviderCompletion> {
@@ -109,11 +151,7 @@ async function callPerplexity(prompt: string, maxTokens: number, key: string, mo
   });
   const data = (await response.json()) as ChatCompletionResponse;
   if (!response.ok) throw new Error(`فشل اتصال Perplexity برمز ${response.status}.`);
-  return {
-    text: data.choices?.[0]?.message?.content ?? "",
-    inputTokens: data.usage?.prompt_tokens,
-    outputTokens: data.usage?.completion_tokens
-  };
+  return { text: data.choices?.[0]?.message?.content ?? "", usage: parseOpenAiStyleUsage(data.usage) };
 }
 
 async function callAnthropic(prompt: string, maxTokens: number, key: string, model: string): Promise<ProviderCompletion> {
@@ -132,17 +170,13 @@ async function callAnthropic(prompt: string, maxTokens: number, key: string, mod
     }),
     signal: AbortSignal.timeout(120_000)
   });
-  const data = (await response.json()) as { content?: Array<{ type: string; text?: string }>; usage?: { input_tokens?: number; output_tokens?: number }; error?: { message?: string } };
+  const data = (await response.json()) as { content?: Array<{ type: string; text?: string }>; usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number }; error?: { message?: string } };
   if (!response.ok) throw new Error(`فشل اتصال Anthropic برمز ${response.status}.`);
-  return {
-    text: data.content?.map((item) => item.text ?? "").join("\n") ?? "",
-    inputTokens: data.usage?.input_tokens,
-    outputTokens: data.usage?.output_tokens
-  };
+  return { text: data.content?.map((item) => item.text ?? "").join("\n") ?? "", usage: parseAnthropicUsage(data.usage) };
 }
 
 interface ChatCompletionResponse {
   choices?: Array<{ message?: { content?: string } }>;
-  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  usage?: OpenAiStyleUsage;
   error?: { message?: string };
 }

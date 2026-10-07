@@ -3,12 +3,12 @@ import { generateText } from "./ai.js";
 import { imageCostUsd } from "./budget.js";
 import { forgetImage, recallImage, rememberImage } from "./image-cache.js";
 import { resolveChainForContent } from "./models.js";
-import { findModel, imageCostFromUsage } from "@content-agent/shared";
-import { releaseSpend, reserveSpend, settleSpend } from "./usage.js";
+import { findModel, imageCostFromUsage, imageFailureCostFromUsage } from "@content-agent/shared";
+import { billFailedCall, releaseSpend, reserveSpend, settleSpend } from "./usage.js";
 import { sanitizeArticleHtml } from "./html-sanitizer.js";
 import { asStringArray, extractJson } from "./json.js";
 import { scoreArticle } from "./scoring.js";
-import { generateGeminiImage } from "./gemini-image.js";
+import { generateGeminiImage, ImageNotReturnedError } from "./gemini-image.js";
 import { fetchGscQueries, type GscSite } from "./google-search-console.js";
 import { publishPost, searchWordPressInternalContent, uploadMedia } from "./wordpress.js";
 
@@ -218,7 +218,18 @@ async function generateImageWithChain(contentItemId: string, prompt: string): Pr
     } catch (error) {
       const message = error instanceof Error ? error.message : "خطأ غير معروف";
       failures.push(`${ref.model}: ${message}`);
-      await releaseSpend(reservationId, { durationMs: Date.now() - started, error: message });
+      if (error instanceof ImageNotReturnedError && error.usage) {
+        // The model answered without an image: Google still bills the tokens it used.
+        await billFailedCall(reservationId, {
+          inputTokens: error.usage.textInputTokens ?? 0,
+          outputTokens: error.usage.textOutputTokens ?? 0,
+          costUsd: imageFailureCostFromUsage(spec, error.usage),
+          durationMs: Date.now() - started,
+          error: message
+        });
+      } else {
+        await releaseSpend(reservationId, { durationMs: Date.now() - started, error: message });
+      }
     }
   }
   throw new Error(`فشل توليد الصورة بكل الموديلات المتاحة: ${failures.join(" | ")}`);
