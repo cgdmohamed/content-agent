@@ -123,6 +123,38 @@ services:
     networks:
       - content-agent
 
+  backup:
+    # Daily pg_dump with verification, optional age encryption and S3-compatible off-site copy.
+    build:
+      context: .
+      dockerfile: docker/backup.Dockerfile
+    restart: unless-stopped
+    environment:
+      PGHOST: postgres
+      PGUSER: content_agent
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      PGDATABASE: content_agent
+      BACKUP_HOUR_UTC: ${BACKUP_HOUR_UTC:-2}
+      BACKUP_KEEP_DAILY: ${BACKUP_KEEP_DAILY:-7}
+      BACKUP_KEEP_WEEKLY: ${BACKUP_KEEP_WEEKLY:-4}
+      BACKUP_FULL_VERIFY: ${BACKUP_FULL_VERIFY:-weekly}
+      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:-}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      BACKUP_S3_PREFIX: ${BACKUP_S3_PREFIX:-content-agent}
+      BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
+      BACKUP_ALLOW_PLAINTEXT_UPLOAD: ${BACKUP_ALLOW_PLAINTEXT_UPLOAD:-false}
+      BACKUP_PING_URL: ${BACKUP_PING_URL:-}
+      AWS_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${BACKUP_S3_SECRET_ACCESS_KEY:-}
+      AWS_DEFAULT_REGION: ${BACKUP_S3_REGION:-auto}
+    volumes:
+      - backup-data:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - content-agent
+
   web:
     build:
       context: .
@@ -150,3 +182,4 @@ networks:
 volumes:
   postgres-data:
   redis-data:
+  backup-data:

@@ -129,7 +129,7 @@ The API and worker images run as the non-root `node` user and copy only runtime 
 The API trusts the production reverse proxy for forwarded protocol/client metadata, enables Nest shutdown hooks, and the worker closes BullMQ workers, Redis, and PostgreSQL on `SIGTERM`/`SIGINT` for safer container stops.
 The web container serves the React bundle through Nginx with conservative security headers, immutable asset caching, gzip compression, and a `/healthz` endpoint used by Docker Compose.
 
-Back up PostgreSQL regularly. Redis is operational infrastructure and is never the source of truth for content records.
+Back up PostgreSQL regularly (see **Backups** below: the `backup` service does it for you). Redis is operational infrastructure and is never the source of truth for content records.
 
 ### Production Environment
 
@@ -229,10 +229,47 @@ For a short launch checklist, see `PRODUCTION_CHECKLIST.md`.
 
 Every mutation shows a toast on success (via `meta.successMessage` on the mutation) and on failure (global `MutationCache` handler; the login form opts out with `meta.silent`). React render crashes are caught by an Error Boundary: one per route, so navigation keeps working and moving to another route clears it, plus a page-level fallback. Crashes, `window.onerror` and unhandled promise rejections are posted to `POST /api/client-errors` (authenticated, length-limited, at most 5 per page load) and written to the API log as one JSON line with the user id and request id, so they can be found next to server errors.
 
+### Backups
+
+The Compose file includes a `backup` service (`docker/backup.Dockerfile`, scripts in `docker/backup/`). It runs a scheduler that, once a day at `BACKUP_HOUR_UTC` (default 02:00 UTC) and at start-up if the last good backup is older than 24 hours:
+
+1. `pg_dump` in custom format (compressed) of the application database;
+2. **verifies** it: the dump must be readable and contain `schema_migrations` and `users`; on Sundays (or `BACKUP_FULL_VERIFY=always`) it also **restores the dump into a throwaway database** and checks tables, migrations and users, so a backup that cannot be restored is detected the same day instead of during an incident;
+3. encrypts it with [age](https://age-encryption.org) when `BACKUP_AGE_RECIPIENT` is set (the server only holds the public key; keep the private key offline);
+4. writes a `.sha256`, stores it under `/backups/daily` (and a copy on Sundays under `/backups/weekly`), prunes to `BACKUP_KEEP_DAILY` (7) and `BACKUP_KEEP_WEEKLY` (4);
+5. optionally copies it to S3-compatible storage (`BACKUP_S3_*`; AWS S3, Cloudflare R2, Backblaze B2, MinIO...) and pings `BACKUP_PING_URL` (`/start`, success, `/fail`) so a missed or failed run raises an alert even when nobody reads logs.
+
+It writes `/backups/last_backup.json`, logs one JSON line per event, and its Docker healthcheck turns unhealthy when the last run failed or is older than 36 hours.
+
+**Setup (do this before relying on it):**
+
+```bash
+age-keygen -o backup-key.txt     # keep this file OFFLINE (password manager / safe), never on the server
+# put the "Public key: age1..." value in BACKUP_AGE_RECIPIENT
+```
+
+For off-site copies create a bucket with a lifecycle rule for retention and **write-only** credentials (a compromised server must not be able to delete history). The scripts refuse to upload an unencrypted dump unless `BACKUP_ALLOW_PLAINTEXT_UPLOAD=true`. Dumps contain user emails, password hashes and the encrypted WordPress/GSC secrets, **and are useless without `ENCRYPTION_KEY_BASE64`**: store that key separately from the backups.
+
+**Restore** (run inside the backup container, `docker compose exec backup sh`; or anywhere with `pg_restore`, `psql` and `age`):
+
+```bash
+ls /backups/daily                                           # or download the file from your bucket
+# 1. Restore into a NEW database and inspect it (default name: content_agent_restored)
+AGE_IDENTITY_FILE=/path/to/backup-key.txt sh /opt/backup/restore.sh /backups/daily/content_agent_YYYYMMDD_HHMMSS.dump.age
+# 2. Disaster recovery over the live database: stop api + worker first
+docker compose stop api worker
+CONFIRM_OVERWRITE=yes AGE_IDENTITY_FILE=/path/to/backup-key.txt sh /opt/backup/restore.sh <file> content_agent
+docker compose start api worker
+```
+
+`restore.sh` verifies the checksum first, refuses to overwrite an existing database unless `CONFIRM_OVERWRITE=yes`, and never touches the live database when restoring into a new name. After a restore, BullMQ jobs that were only in Redis are gone: failed or missing jobs can be re-queued from the Operations screen, and `job_runs` shows what was in flight.
+
+**Practice the restore** once after setup and after every major upgrade: that is the only proof your backups work end to end (the automated weekly restore test covers the dump, not your key handling).
+
 ### Testing
 
 - `pnpm verify`: typecheck, unit tests, lint and build (no services needed).
-- `pnpm test:integration`: needs PostgreSQL and Redis (`TEST_DATABASE_URL`, `TEST_REDIS_URL`; the database is wiped, use a throwaway one). Covers the SQL migrations, the API over real HTTP (auth, session revocation, login rate limit in Redis, CSRF origin check, queueing into BullMQ, per-site model settings, metrics), the worker pipeline NEW → PUBLISHED with stubbed AI/WordPress/Gemini responses (metered cost, model allow-list, fallback, hard budget limit, retry without paying for a second image, WordPress duplicate adoption) and concurrent AI-budget reservations.
+- `pnpm test:integration`: needs PostgreSQL and Redis (and `pg_dump`, `pg_restore`, `psql`, `age` on the PATH for the backup script tests) (`TEST_DATABASE_URL`, `TEST_REDIS_URL`; the database is wiped, use a throwaway one). Covers the SQL migrations, the API over real HTTP (auth, session revocation, login rate limit in Redis, CSRF origin check, queueing into BullMQ, per-site model settings, metrics), the worker pipeline NEW → PUBLISHED with stubbed AI/WordPress/Gemini responses (metered cost, model allow-list, fallback, hard budget limit, retry without paying for a second image, WordPress duplicate adoption) and concurrent AI-budget reservations.
 - `pnpm e2e`: Playwright against the built API and web bundle (`pnpm build` first; set `CHROMIUM_PATH` to use a preinstalled Chromium, otherwise `pnpm exec playwright install chromium`).
 - GitHub Actions runs all of the above (`.github/workflows/ci.yml`) with PostgreSQL and Redis service containers.
 

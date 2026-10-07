@@ -53,6 +53,8 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # pg_dump/pg_restore/psql and age are needed by the backup script tests.
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client age
       - run: pnpm test:integration
 
   e2e:
