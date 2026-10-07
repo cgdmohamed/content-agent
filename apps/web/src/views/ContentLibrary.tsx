@@ -1,12 +1,14 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useEffect, useState, type FormEvent, type ReactElement } from "react";
-import { CheckCircle2, ChevronDown, ChevronLeft, Copy, FilePlus2, FolderOpen, Layers3, Play, RotateCcw, Search, Trash2, XCircle } from "lucide-react";
+import { ChevronDown, ChevronLeft, Copy, FilePlus2, FolderOpen, Layers3, Play, RotateCcw, Search, SlidersHorizontal, Trash2, XCircle } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { contentStates, nextPrimaryOperation, type ContentOperation } from "@content-agent/shared";
 import { api, type ContentDto } from "../api/client";
 import { useCurrentUser } from "../auth";
 import { StatusBadge } from "../ui/Badge";
 import { IconButton } from "../ui/IconButton";
+import { PageHeader } from "../ui/PageHeader";
+import { RowMenu, type MenuAction } from "../ui/RowMenu";
 import { modeLabels, operationLabels, stateLabels } from "../ui/labels";
 import { ActionError, EmptyState, ErrorState, LoadingState } from "../ui/StateViews";
 
@@ -28,6 +30,8 @@ export function ContentLibrary(): ReactElement {
   const [updatedTo, setUpdatedTo] = useState("");
   const [needsAttentionOnly, setNeedsAttentionOnly] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const navigate = useNavigate();
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogConfig | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
@@ -167,19 +171,22 @@ export function ContentLibrary(): ReactElement {
   const deletableIds = filteredContent.filter((row) => canDeleteContent(row.state)).map((row) => row.id);
   const selectedCount = selectedIds.length;
 
+  const advancedCount = [modeFilter !== "all", minimumScore !== "", updatedFrom !== "", updatedTo !== "", needsAttentionOnly].filter(Boolean).length;
+  const isAdmin = user.role === "ADMIN";
+
   return (
-    <div className="rounded-lg border border-slate-200 bg-white">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-5">
-        <div>
-          <h2 className="text-lg font-semibold">مكتبة المحتوى</h2>
-          <p className="text-sm text-slate-500">فلترة حسب الموقع أو الحالة أو النمط أو التاريخ أو الدرجة أو كلمة البحث.</p>
-        </div>
-        <IconButton icon={formOpen ? XCircle : FilePlus2} tone="primary" onClick={() => setFormOpen((value) => !value)}>
-          {formOpen ? "إغلاق النموذج" : "إنشاء محتوى"}
-        </IconButton>
-      </div>
+    <div className="space-y-4">
+      <PageHeader
+        title="مكتبة المحتوى"
+        description="كل المقالات في مكان واحد: افتح المقال أو أكمل خطوته التالية من نفس الصف."
+        actions={
+          <IconButton icon={formOpen ? XCircle : FilePlus2} tone="primary" onClick={() => setFormOpen((value) => !value)}>
+            {formOpen ? "إغلاق النموذج" : "إنشاء محتوى"}
+          </IconButton>
+        }
+      />
       {formOpen ? (
-        <div className="border-b border-slate-200 bg-slate-50 p-5">
+        <section aria-label="إنشاء محتوى" className="rounded-lg border border-slate-200 bg-white p-5">
           <div className="mb-4 inline-flex rounded-md border border-slate-200 bg-white p-1 text-sm">
             <button type="button" className={`rounded px-3 py-1.5 ${creationMode === "manual" ? "bg-teal text-white" : "text-slate-600"}`} onClick={() => setCreationMode("manual")}>محتوى فردي</button>
             <button type="button" className={`rounded px-3 py-1.5 ${creationMode === "bulk" ? "bg-teal text-white" : "text-slate-600"}`} onClick={() => setCreationMode("bulk")}>دفعة محتوى</button>
@@ -262,158 +269,156 @@ export function ContentLibrary(): ReactElement {
               <div className="md:col-span-2"><ActionError error={createBulkContent.error} /></div>
             </form>
           )}
-        </div>
+        </section>
       ) : null}
-      <div className="px-5 pt-4 space-y-2">
+      <div className="space-y-2 empty:hidden">
         <ActionError error={runOperation.error} />
         <ActionError error={duplicateContent.error} />
         <ActionError error={deleteContent.error} />
         <ActionError error={cleanupContent.error} />
         <ActionError error={rollbackPublishing.error} />
       </div>
-      <div className="grid gap-3 border-b border-slate-100 px-5 py-4 md:grid-cols-7">
-        <label>
-          <span className="text-xs font-medium text-slate-500">بحث</span>
-          <div className="mt-1 flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">
-            <Search className="h-4 w-4 text-slate-400" />
-            <input value={search} onChange={(event) => setSearch(event.target.value)} className="w-full bg-transparent text-sm outline-none" />
+
+      <section className="rounded-lg border border-slate-200 bg-white">
+        <div className="space-y-3 border-b border-slate-100 p-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.4fr)_1fr_1fr_auto]">
+            <label className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 focus-within:border-teal">
+              <Search className="h-4 w-4 shrink-0 text-slate-400" />
+              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="ابحث بالعنوان أو الكلمة المستهدفة" aria-label="بحث" className="w-full bg-transparent text-sm outline-none" />
+            </label>
+            <select aria-label="الموقع" value={siteFilter} onChange={(event) => setSiteFilter(event.target.value)} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm">
+              <option value="all">كل المواقع</option>
+              {(sites.data ?? []).map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}
+            </select>
+            <select aria-label="الحالة" value={stateFilter} onChange={(event) => setStateFilter(event.target.value)} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm">
+              <option value="all">كل الحالات</option>
+              {contentStates.map((state) => <option key={state} value={state}>{stateLabels[state]}</option>)}
+            </select>
+            <button type="button" aria-expanded={showAdvanced} onClick={() => setShowAdvanced((value) => !value)} className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+              <SlidersHorizontal className="h-4 w-4" />تصفية متقدمة
+              {advancedCount > 0 ? <span className="rounded-full bg-teal px-1.5 text-xs text-white">{advancedCount}</span> : null}
+            </button>
           </div>
-        </label>
-        <label>
-          <span className="text-xs font-medium text-slate-500">الموقع</span>
-          <select value={siteFilter} onChange={(event) => setSiteFilter(event.target.value)} className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm">
-            <option value="all">كل المواقع</option>
-            {(sites.data ?? []).map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}
-          </select>
-        </label>
-        <label>
-          <span className="text-xs font-medium text-slate-500">الحالة</span>
-          <select value={stateFilter} onChange={(event) => setStateFilter(event.target.value)} className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm">
-            <option value="all">كل الحالات</option>
-            {contentStates.map((state) => <option key={state} value={state}>{stateLabels[state]}</option>)}
-          </select>
-        </label>
-        <label>
-          <span className="text-xs font-medium text-slate-500">النمط</span>
-          <select value={modeFilter} onChange={(event) => setModeFilter(event.target.value)} className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm">
-            <option value="all">كل الأنماط</option>
-            {Object.entries(modeLabels).map(([mode, label]) => <option key={mode} value={mode}>{label}</option>)}
-          </select>
-        </label>
-        <label>
-          <span className="text-xs font-medium text-slate-500">أقل درجة</span>
-          <input value={minimumScore} onChange={(event) => setMinimumScore(event.target.value)} type="number" min={0} max={100} className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm" />
-        </label>
-        <label>
-          <span className="text-xs font-medium text-slate-500">تحديث من</span>
-          <input value={updatedFrom} onChange={(event) => setUpdatedFrom(event.target.value)} type="date" className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm" />
-        </label>
-        <label>
-          <span className="text-xs font-medium text-slate-500">تحديث إلى</span>
-          <input value={updatedTo} onChange={(event) => setUpdatedTo(event.target.value)} type="date" className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm" />
-        </label>
-        <label className="flex items-center gap-2 text-sm text-slate-600 md:col-span-7">
-          <input checked={needsAttentionOnly} onChange={(event) => setNeedsAttentionOnly(event.target.checked)} type="checkbox" className="h-4 w-4" />
-          عرض العناصر التي تحتاج متابعة فقط
-        </label>
-      </div>
-      {user.role === "ADMIN" ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-3">
-          <label className="flex items-center gap-2 text-sm font-medium text-slate-600">
-            <input
-              type="checkbox"
-              className="h-4 w-4"
-              checked={deletableIds.length > 0 && deletableIds.every((id) => selectedIds.includes(id))}
-              onChange={(event) => setSelectedIds(event.target.checked ? deletableIds : [])}
-            />
-            تحديد القابل للحذف
-          </label>
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-slate-500">{selectedCount > 0 ? `تم تحديد ${selectedCount}` : "لا يوجد تحديد"}</span>
-            <IconButton
-              icon={RotateCcw}
-              disabled={selectedCount === 0 || rollbackPublishing.isPending}
-              onClick={() => setConfirmDialog({
-                title: "سحب/إلغاء النشر",
-                message: `سيتم سحب المنشور من ووردبريس إلى مسودة وإلغاء جدولة المجدول لعدد ${selectedCount} عنصر محدد.`,
-                confirmLabel: "تأكيد التراجع",
-                onConfirm: () => rollbackPublishing.mutate([...selectedIds])
-              })}
-            >
-              {rollbackPublishing.isPending ? "جاري التراجع..." : "سحب/إلغاء النشر"}
-            </IconButton>
-            <IconButton
-              icon={Trash2}
-              tone="danger"
-              disabled={selectedCount === 0 || cleanupContent.isPending}
-              onClick={() => setConfirmDialog({
-                title: "حذف العناصر المحددة",
-                message: `سيتم إلغاء المهام المنتظرة وحذف ${selectedCount} عنصر محتوى قابل للحذف. لن يتم حذف المنشور أو المجدول قبل سحب النشر.`,
-                confirmLabel: "حذف المحدد",
-                tone: "danger",
-                onConfirm: () => cleanupContent.mutate([...selectedIds])
-              })}
-            >
-              {cleanupContent.isPending ? "جاري التنظيف..." : "حذف المحدد"}
-            </IconButton>
-          </div>
+          {showAdvanced ? (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <label className="text-xs text-slate-500">النمط
+                <select value={modeFilter} onChange={(event) => setModeFilter(event.target.value)} className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900">
+                  <option value="all">كل الأنماط</option>
+                  {Object.entries(modeLabels).map(([mode, label]) => <option key={mode} value={mode}>{label}</option>)}
+                </select>
+              </label>
+              <label className="text-xs text-slate-500">أقل درجة جودة
+                <input value={minimumScore} onChange={(event) => setMinimumScore(event.target.value)} type="number" min={0} max={100} className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900" />
+              </label>
+              <label className="text-xs text-slate-500">آخر تحديث من
+                <input value={updatedFrom} onChange={(event) => setUpdatedFrom(event.target.value)} type="date" className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900" />
+              </label>
+              <label className="text-xs text-slate-500">آخر تحديث إلى
+                <input value={updatedTo} onChange={(event) => setUpdatedTo(event.target.value)} type="date" className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900" />
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-600 sm:col-span-2 lg:col-span-4">
+                <input checked={needsAttentionOnly} onChange={(event) => setNeedsAttentionOnly(event.target.checked)} type="checkbox" className="h-4 w-4" />
+                العناصر التي تحتاج متابعة فقط (فشل أو جودة أقل من 60)
+              </label>
+            </div>
+          ) : null}
         </div>
-      ) : null}
-      <div className="bg-slate-50/70 p-4">
-        <div className="space-y-3">
+
+        {isAdmin && selectedCount > 0 ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-teal/20 bg-teal/5 px-4 py-2.5" role="region" aria-label="إجراءات على المحدد">
+            <span className="text-sm font-medium text-teal">تم تحديد {selectedCount}</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <IconButton
+                icon={RotateCcw}
+                disabled={rollbackPublishing.isPending}
+                onClick={() => setConfirmDialog({
+                  title: "سحب/إلغاء النشر",
+                  message: `سيتم سحب المنشور من ووردبريس إلى مسودة وإلغاء جدولة المجدول لعدد ${selectedCount} عنصر محدد.`,
+                  confirmLabel: "تأكيد التراجع",
+                  onConfirm: () => rollbackPublishing.mutate([...selectedIds])
+                })}
+              >
+                {rollbackPublishing.isPending ? "جاري التراجع..." : "سحب/إلغاء النشر"}
+              </IconButton>
+              <IconButton
+                icon={Trash2}
+                tone="danger"
+                disabled={cleanupContent.isPending}
+                onClick={() => setConfirmDialog({
+                  title: "حذف العناصر المحددة",
+                  message: `سيتم إلغاء المهام المنتظرة وحذف ${selectedCount} عنصر محتوى قابل للحذف. لن يتم حذف المنشور أو المجدول قبل سحب النشر.`,
+                  confirmLabel: "حذف المحدد",
+                  tone: "danger",
+                  onConfirm: () => cleanupContent.mutate([...selectedIds])
+                })}
+              >
+                {cleanupContent.isPending ? "جاري التنظيف..." : "حذف المحدد"}
+              </IconButton>
+              <button type="button" className="px-2 py-1 text-sm text-slate-500 hover:text-slate-800" onClick={() => setSelectedIds([])}>إلغاء التحديد</button>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-2 text-xs text-slate-500">
+          <span>{content.data.total === 0 ? "لا توجد نتائج" : `عرض ${currentStart}–${currentEnd} من ${content.data.total}`}</span>
+          {isAdmin && deletableIds.length > 0 ? (
+            <label className="flex items-center gap-2">
+              <input type="checkbox" className="h-4 w-4" checked={deletableIds.every((id) => selectedIds.includes(id))} onChange={(event) => setSelectedIds(event.target.checked ? deletableIds : [])} />
+              تحديد القابل للحذف في هذه الصفحة
+            </label>
+          ) : null}
+        </div>
+
+        <div className="hidden grid-cols-[1rem_minmax(0,1fr)_7rem_3rem_6.5rem_11rem] gap-x-3 px-5 pt-3 text-xs font-medium text-slate-400 md:grid">
+          <span />
+          <span>العنوان</span>
+          <span>الحالة</span>
+          <span>الجودة</span>
+          <span>آخر تحديث</span>
+          <span />
+        </div>
+        <div className="space-y-3 p-2 sm:p-3">
           {groupedContent.map((group) => (
             <ContentGroup
               key={group.id}
               group={group}
-              renderCard={(row) => (
-                <ContentCard
+              renderRow={(row) => (
+                <ContentRow
                   key={row.id}
                   row={row}
-                  isAdmin={user.role === "ADMIN"}
+                  isAdmin={isAdmin}
                   selected={selectedIds.includes(row.id)}
                   onSelect={(checked) => setSelectedIds((current) => checked ? [...new Set([...current, row.id])] : current.filter((id) => id !== row.id))}
-                  primaryAction={renderPrimaryAction(row.id, row.state, nextPrimaryOperation(row.state), runOperation.isPending, user.role === "ADMIN", (operation) =>
+                  primaryAction={renderPrimaryAction(row.id, row.state, nextPrimaryOperation(row.state), runOperation.isPending, isAdmin, (operation) =>
                     runOperation.mutate({ id: row.id, operation })
                   )}
-                  duplicateButton={(
-                    <IconButton
-                      icon={Copy}
-                      className="min-h-9 px-3 py-1.5"
-                      disabled={duplicateContent.isPending}
-                      onClick={() => duplicateContent.mutate(row.id)}
-                    >
-                      نسخ
-                    </IconButton>
-                  )}
-                  deleteButton={user.role === "ADMIN" && canDeleteContent(row.state) ? (
-                    <IconButton
-                      icon={Trash2}
-                      tone="danger"
-                      className="min-h-9 px-3 py-1.5"
-                      disabled={deleteContent.isPending}
-                      onClick={() => setConfirmDialog({
-                        title: "حذف المحتوى",
-                        message: `سيتم حذف "${row.title}" نهائيًا من مكتبة المحتوى إذا لم يكن مرتبطًا بمهمة نشطة.`,
-                        confirmLabel: "حذف",
-                        tone: "danger",
-                        onConfirm: () => deleteContent.mutate(row.id)
-                      })}
-                    >
-                      حذف
-                    </IconButton>
-                  ) : null}
+                  menuActions={[
+                    { label: "فتح المقال", icon: FolderOpen, onClick: () => navigate(`/content/${row.id}`) },
+                    { label: "نسخ", icon: Copy, disabled: duplicateContent.isPending, onClick: () => duplicateContent.mutate(row.id) },
+                    ...(isAdmin && canDeleteContent(row.state)
+                      ? [{
+                          label: "حذف",
+                          icon: Trash2,
+                          danger: true,
+                          disabled: deleteContent.isPending,
+                          onClick: () => setConfirmDialog({
+                            title: "حذف المحتوى",
+                            message: `سيتم حذف "${row.title}" نهائيًا من مكتبة المحتوى إذا لم يكن مرتبطًا بمهمة نشطة.`,
+                            confirmLabel: "حذف",
+                            tone: "danger",
+                            onConfirm: () => deleteContent.mutate(row.id)
+                          })
+                        }]
+                      : [])
+                  ]}
                 />
               )}
             />
           ))}
+          {content.data.total === 0 ? <div className="p-3"><EmptyState label="لا توجد نتائج مطابقة للفلاتر الحالية." /></div> : null}
         </div>
-        {content.data.total === 0 ? <div className="p-5"><EmptyState label="لا توجد نتائج مطابقة للفلاتر الحالية." /></div> : null}
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-4 text-sm">
-        <div className="text-slate-600">
-          عرض {currentStart} - {currentEnd} من {content.data.total}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-3 text-sm">
           <label className="flex items-center gap-2 text-slate-600">
             لكل صفحة
             <select value={pageSize} onChange={(event) => setPageSize(Number(event.target.value))} className="rounded-md border border-slate-200 px-2 py-1">
@@ -423,15 +428,13 @@ export function ContentLibrary(): ReactElement {
               <option value={100}>100</option>
             </select>
           </label>
-          <button className="rounded-md border border-slate-200 px-3 py-1.5 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>
-            السابق
-          </button>
-          <span className="px-2 text-slate-600">صفحة {content.data.page} من {totalPages}</span>
-          <button className="rounded-md border border-slate-200 px-3 py-1.5 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" disabled={page >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>
-            التالي
-          </button>
+          <div className="flex items-center gap-2">
+            <button type="button" className="rounded-md border border-slate-200 px-3 py-1.5 disabled:cursor-not-allowed disabled:text-slate-300" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>السابق</button>
+            <span className="px-1 text-slate-600 tabular-nums">{content.data.page} / {totalPages}</span>
+            <button type="button" className="rounded-md border border-slate-200 px-3 py-1.5 disabled:cursor-not-allowed disabled:text-slate-300" disabled={page >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>التالي</button>
+          </div>
         </div>
-      </div>
+      </section>
       {confirmDialog ? (
         <ConfirmDialog
           config={confirmDialog}
@@ -488,111 +491,72 @@ interface ContentDisplayGroup {
   rows: ContentDto[];
 }
 
-function ContentGroup(props: { group: ContentDisplayGroup; renderCard: (row: ContentDto) => ReactElement }): ReactElement {
+function ContentGroup(props: { group: ContentDisplayGroup; renderRow: (row: ContentDto) => ReactElement }): ReactElement {
   const { group } = props;
   const [open, setOpen] = useState(false);
   if (group.kind === "single") {
-    return <>{group.rows.map(props.renderCard)}</>;
+    return <ul className="divide-y divide-slate-100 overflow-hidden rounded-md border border-slate-200">{group.rows.map(props.renderRow)}</ul>;
   }
   const completed = group.rows.filter((row) => ["APPROVED", "SCHEDULED", "PUBLISHED"].includes(row.state)).length;
-  const scheduled = group.rows.filter((row) => row.scheduledDate).length;
   const averageScore = Math.round(group.rows.reduce((sum, row) => sum + row.score, 0) / Math.max(1, group.rows.length));
   const Icon = open ? ChevronDown : ChevronLeft;
   return (
-    <section className="rounded-lg border border-teal/20 bg-white p-3 shadow-sm">
-      <button
-        type="button"
-        className="flex w-full flex-wrap items-center justify-between gap-3 rounded-md bg-teal/5 px-4 py-3 text-right transition hover:bg-teal/10"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-      >
-        <div className="flex items-center gap-3">
-          <span className="inline-flex h-10 w-10 items-center justify-center rounded-md bg-teal text-white">
-            <Layers3 className="h-5 w-5" />
-          </span>
-          <div>
-            <h3 className="font-semibold text-slate-950">{group.title}</h3>
-            <p className="mt-1 text-xs text-slate-600">{group.subtitle}</p>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
-          <span className="rounded-md bg-white px-2.5 py-1 text-slate-700">{group.rows.length} مقال</span>
-          <span className="rounded-md bg-white px-2.5 py-1 text-slate-700">{completed} جاهز</span>
-          <span className="rounded-md bg-white px-2.5 py-1 text-slate-700">{scheduled} بموعد</span>
-          <span className={`rounded-md px-2.5 py-1 ${scoreClass(averageScore)}`}>متوسط {averageScore}/100</span>
-          <span className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-white text-slate-600">
-            <Icon className="h-4 w-4" />
-          </span>
-        </div>
+    <section className="overflow-hidden rounded-md border border-slate-200">
+      <button type="button" className="flex w-full flex-wrap items-center justify-between gap-2 bg-slate-50 px-4 py-2.5 text-right hover:bg-slate-100" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
+        <span className="flex min-w-0 items-center gap-2">
+          <Layers3 className="h-4 w-4 shrink-0 text-teal" />
+          <span className="truncate font-medium">{group.title}</span>
+          <span className="hidden text-xs text-slate-500 sm:inline">{group.subtitle}</span>
+        </span>
+        <span className="flex items-center gap-3 text-xs text-slate-600">
+          <span>{group.rows.length} مقال</span>
+          <span>{completed} جاهز</span>
+          <span className={`rounded px-1.5 py-0.5 font-medium ${scoreClass(averageScore)}`}>متوسط {averageScore}</span>
+          <Icon className="h-4 w-4" />
+        </span>
       </button>
-      {open ? <div className="mt-3 space-y-3">{group.rows.map(props.renderCard)}</div> : null}
+      {open ? <ul className="divide-y divide-slate-100 border-t border-slate-200">{group.rows.map(props.renderRow)}</ul> : null}
     </section>
   );
 }
 
-function ContentCard(props: {
+/** One article = one row: the title opens it, the next step is the only button, everything else is in the menu. */
+function ContentRow(props: {
   row: ContentDto;
   isAdmin: boolean;
   selected: boolean;
   onSelect: (checked: boolean) => void;
-  primaryAction: ReactElement;
-  duplicateButton: ReactElement;
-  deleteButton: ReactElement | null;
+  primaryAction: ReactElement | null;
+  menuActions: MenuAction[];
 }): ReactElement {
   const { row } = props;
+  const secondary = [row.site, row.targetKeyword || null, row.mode === "BULK" ? "دفعة" : null].filter(Boolean).join(" · ");
   return (
-    <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="min-w-0">
-          <div className="flex items-start gap-3">
-            {props.isAdmin ? (
-              <input
-                type="checkbox"
-                className="mt-1 h-4 w-4 shrink-0"
-                checked={props.selected}
-                onChange={(event) => props.onSelect(event.target.checked)}
-                aria-label={`تحديد ${row.title}`}
-              />
-            ) : null}
-            <div className="min-w-0 flex-1">
-              <div className="mb-2 flex flex-wrap items-center gap-2">
-                <StatusBadge state={row.state} />
-                <span className={`rounded-md px-2.5 py-1 text-xs font-semibold ${scoreClass(row.score)}`}>{row.score}/100</span>
-                <span className="rounded-md bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">{modeLabels[row.mode]}</span>
-              </div>
-              <h3 className="text-lg font-semibold leading-8 text-slate-950">{row.title}</h3>
-              <div className="mt-3 grid gap-2 md:grid-cols-2">
-                <DetailPill label="الكلمة المستهدفة" value={row.targetKeyword || "-"} />
-                <DetailPill label="الموقع" value={row.site} />
-              </div>
-            </div>
-          </div>
-        </div>
-        <div className="grid content-between gap-3 border-t border-slate-100 pt-3 xl:border-r xl:border-t-0 xl:pr-4 xl:pt-0">
-          <div className="grid grid-cols-2 gap-2">
-            <DetailPill label="الجدولة" value={row.scheduledDate ? formatDate(row.scheduledDate) : "-"} compact />
-            <DetailPill label="آخر تحديث" value={formatDate(row.updatedAt)} compact />
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Link className="inline-flex min-h-9 items-center gap-2 rounded-md border border-slate-200 px-3 py-1.5 font-medium hover:border-teal/40 hover:bg-slate-50" to={`/content/${row.id}`} title="فتح">
-              <FolderOpen className="h-4 w-4" />فتح
-            </Link>
-            {props.primaryAction}
-            {props.duplicateButton}
-            {props.deleteButton}
-          </div>
+    <li className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 bg-white px-3 py-3 hover:bg-slate-50 md:grid-cols-[1rem_minmax(0,1fr)_7rem_3rem_6.5rem_11rem]">
+      {props.isAdmin ? (
+        <input type="checkbox" className="h-4 w-4 shrink-0" checked={props.selected} onChange={(event) => props.onSelect(event.target.checked)} aria-label={`تحديد ${row.title}`} />
+      ) : (
+        <span className="w-4" />
+      )}
+      <div className="min-w-0">
+        <Link to={`/content/${row.id}`} className="block truncate font-medium text-slate-900 hover:text-teal">{row.title}</Link>
+        <p className="truncate text-xs text-slate-500">{secondary}</p>
+        <div className="mt-1 flex items-center gap-2 md:hidden">
+          <StatusBadge state={row.state} />
+          <span className={`rounded px-1.5 py-0.5 text-xs font-medium tabular-nums ${scoreClass(row.score)}`}>{row.score}</span>
         </div>
       </div>
-    </article>
-  );
-}
-
-function DetailPill(props: { label: string; value: string; compact?: boolean }): ReactElement {
-  return (
-    <div className={`rounded-md border border-slate-100 bg-slate-50 ${props.compact ? "px-3 py-2" : "px-3 py-2.5"}`}>
-      <p className="text-xs font-medium text-slate-500">{props.label}</p>
-      <p className="mt-1 break-words text-sm font-semibold leading-6 text-slate-900">{props.value}</p>
-    </div>
+      <div className="hidden md:block"><StatusBadge state={row.state} /></div>
+      <div className="hidden md:block"><span className={`rounded px-1.5 py-0.5 text-xs font-medium tabular-nums ${scoreClass(row.score)}`}>{row.score}</span></div>
+      <div className="hidden text-xs text-slate-500 md:block">
+        <p>{formatDate(row.updatedAt)}</p>
+        {row.scheduledDate ? <p className="text-amber-700">ينشر {formatDate(row.scheduledDate)}</p> : null}
+      </div>
+      <div className="flex items-center justify-end gap-1">
+        {props.primaryAction}
+        <RowMenu label={`المزيد لـ ${row.title}`} actions={props.menuActions} />
+      </div>
+    </li>
   );
 }
 
@@ -659,20 +623,18 @@ function renderPrimaryAction(
   pending: boolean,
   isAdmin: boolean,
   run: (operation: ContentOperation) => void
-): ReactElement {
-  if (state === "SCHEDULED") {
-    return <span className="inline-flex items-center gap-2 rounded-md bg-amber-50 px-3 py-1.5 font-medium text-amber-700"><CheckCircle2 className="h-4 w-4" />مجدول للنشر</span>;
-  }
-  if (!operation) return <span className="inline-flex items-center gap-2 px-3 py-1.5 text-slate-500"><CheckCircle2 className="h-4 w-4" />مكتمل</span>;
-  if ((operation === "APPROVE" || operation === "PUBLISH") && !isAdmin) return <span className="px-3 py-1.5 text-slate-500">بانتظار المدير</span>;
+): ReactElement | null {
+  // Finished and scheduled articles have no next step; the status badge already says so.
+  if (state === "SCHEDULED" || !operation) return null;
+  if ((operation === "APPROVE" || operation === "PUBLISH") && !isAdmin) return <span className="px-2 text-xs text-slate-400">بانتظار المدير</span>;
   if (operation === "SELECT_IDEA") {
-    return <Link className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-3 py-1.5 font-medium hover:border-teal/40 hover:bg-slate-50" to={`/content/${id}`}><FolderOpen className="h-4 w-4" />اختيار فكرة</Link>;
+    return <Link className="inline-flex min-h-8 items-center gap-1.5 whitespace-nowrap rounded-md border border-slate-200 px-3 py-1 text-sm font-medium hover:border-teal/40 hover:bg-white" to={`/content/${id}`}>اختيار فكرة</Link>;
   }
   if (operation === "SKIP_IMAGE" || operation === "SCHEDULE") {
-    return <Link className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-3 py-1.5 font-medium hover:border-teal/40 hover:bg-slate-50" to={`/content/${id}`}><FolderOpen className="h-4 w-4" />{operationLabels[operation]}</Link>;
+    return <Link className="inline-flex min-h-8 items-center gap-1.5 whitespace-nowrap rounded-md border border-slate-200 px-3 py-1 text-sm font-medium hover:border-teal/40 hover:bg-white" to={`/content/${id}`}>{operationLabels[operation]}</Link>;
   }
   return (
-    <IconButton icon={Play} className="min-h-8 px-3 py-1.5" disabled={pending} onClick={() => run(operation)}>
+    <IconButton icon={Play} className="min-h-8 whitespace-nowrap px-3 py-1" disabled={pending} onClick={() => run(operation)}>
       {operationLabels[operation]}
     </IconButton>
   );

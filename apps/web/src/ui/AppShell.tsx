@@ -1,4 +1,4 @@
-import { BarChart3, CircleDollarSign, FileText, Globe2, ListChecks, LogIn, LogOut, Settings, ShieldCheck, Users } from "lucide-react";
+import { BarChart3, CircleDollarSign, FileText, Globe2, ListChecks, LogIn, LogOut, Menu, Settings, ShieldCheck, Users, X } from "lucide-react";
 import type { ReactElement } from "react";
 import { useEffect, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
@@ -10,15 +10,25 @@ import { api, sessionExpiredEvent } from "../api/client";
 import { IconButton } from "./IconButton";
 import { ActionError, LoadingState } from "./StateViews";
 
-const nav = [
-  { to: "/", label: "لوحة التحكم", icon: BarChart3, adminOnly: false },
-  { to: "/content", label: "مكتبة المحتوى", icon: FileText, adminOnly: false },
-  { to: "/sites", label: "المواقع", icon: Globe2, adminOnly: false },
-  { to: "/usage", label: "الاستهلاك", icon: CircleDollarSign, adminOnly: true },
-  { to: "/site-audit", label: "فحص الموقع", icon: ShieldCheck, adminOnly: true },
-  { to: "/operations", label: "العمليات", icon: ListChecks, adminOnly: true },
-  { to: "/users", label: "المستخدمون", icon: Users, adminOnly: true },
-  { to: "/settings", label: "الإعدادات", icon: Settings, adminOnly: true }
+const navGroups = [
+  {
+    label: "العمل اليومي",
+    items: [
+      { to: "/", label: "لوحة التحكم", icon: BarChart3, adminOnly: false },
+      { to: "/content", label: "مكتبة المحتوى", icon: FileText, adminOnly: false },
+      { to: "/sites", label: "المواقع", icon: Globe2, adminOnly: false }
+    ]
+  },
+  {
+    label: "الإدارة",
+    items: [
+      { to: "/usage", label: "الاستهلاك", icon: CircleDollarSign, adminOnly: true },
+      { to: "/operations", label: "العمليات", icon: ListChecks, adminOnly: true },
+      { to: "/site-audit", label: "فحص الموقع", icon: ShieldCheck, adminOnly: true },
+      { to: "/users", label: "المستخدمون", icon: Users, adminOnly: true },
+      { to: "/settings", label: "الإعدادات", icon: Settings, adminOnly: true }
+    ]
+  }
 ];
 
 const loginSchema = z.object({
@@ -33,6 +43,7 @@ export function AppShell(): ReactElement {
   const location = useLocation();
   const session = useQuery({ queryKey: ["auth", "me"], queryFn: api.me, retry: false });
   const [sessionExpired, setSessionExpired] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   useEffect(() => {
     function onExpired(): void {
       setSessionExpired(true);
@@ -49,71 +60,82 @@ export function AppShell(): ReactElement {
     }
   });
 
+  // The drawer is only meaningful on the page it was opened from.
+  useEffect(() => setMenuOpen(false), [location.pathname]);
+
   if (session.isLoading) return <main className="min-h-screen bg-mist p-6" dir="rtl"><LoadingState label="جاري التحقق من الجلسة..." /></main>;
   if (!session.data) return <LoginScreen expired={sessionExpired} />;
   const user = session.data;
   if (user.role !== "ADMIN" && isAdminPath(location.pathname)) return <Navigate to="/" replace />;
-  const visibleNav = nav.filter((item) => !item.adminOnly || user.role === "ADMIN");
+  const groups = navGroups
+    .map((group) => ({ ...group, items: group.items.filter((item) => !item.adminOnly || user.role === "ADMIN") }))
+    .filter((group) => group.items.length > 0);
+
+  const navigation = (
+    <nav aria-label="التنقل الرئيسي" className="space-y-5">
+      {groups.map((group) => (
+        <div key={group.label}>
+          {groups.length > 1 ? <p className="mb-1 px-3 text-xs font-medium text-slate-400">{group.label}</p> : null}
+          <ul className="space-y-0.5">
+            {group.items.map((item) => (
+              <li key={item.to}>
+                <NavLink
+                  to={item.to}
+                  end={item.to === "/"}
+                  onClick={() => setMenuOpen(false)}
+                  className={({ isActive }) =>
+                    `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium ${isActive ? "bg-teal/10 text-teal" : "text-slate-600 hover:bg-slate-100"}`
+                  }
+                >
+                  <item.icon className="h-4 w-4 shrink-0" />
+                  {item.label}
+                </NavLink>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </nav>
+  );
 
   return (
     <div className="min-h-screen bg-mist text-right text-ink" dir="rtl">
-      <aside className="fixed inset-y-0 right-0 hidden w-64 border-l border-slate-200 bg-white px-4 py-5 lg:block">
-        <div className="mb-8">
-          <p className="text-sm font-semibold text-teal">وكيل المحتوى</p>
-          <h1 className="mt-1 text-xl font-bold">لوحة الإنتاج</h1>
-        </div>
-        <nav className="space-y-1">
-          {visibleNav.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.to === "/"}
-              className={({ isActive }) =>
-                `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium ${
-                  isActive ? "bg-teal text-white" : "text-slate-600 hover:bg-slate-100"
-                }`
-              }
-            >
-              <item.icon className="h-4 w-4" />
-              {item.label}
-            </NavLink>
-          ))}
-        </nav>
+      <aside className="fixed inset-y-0 right-0 hidden w-60 flex-col border-l border-slate-200 bg-white px-3 py-5 lg:flex">
+        <p className="mb-6 px-3 text-lg font-bold text-teal">وكيل المحتوى</p>
+        {navigation}
       </aside>
-      <div className="lg:pr-64">
-        <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/90 px-5 py-4 backdrop-blur">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold">منصة انتاج المحتوى</h2>
+
+      {menuOpen ? (
+        <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="القائمة">
+          <button type="button" aria-label="إغلاق القائمة" className="absolute inset-0 bg-slate-950/40" onClick={() => setMenuOpen(false)} />
+          <div className="absolute inset-y-0 right-0 w-72 max-w-[85vw] overflow-y-auto bg-white px-3 py-4 shadow-xl">
+            <div className="mb-4 flex items-center justify-between px-3">
+              <p className="text-lg font-bold text-teal">وكيل المحتوى</p>
+              <button type="button" aria-label="إغلاق القائمة" className="rounded-md p-2 text-slate-500 hover:bg-slate-100" onClick={() => setMenuOpen(false)}><X className="h-5 w-5" /></button>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-600">
-                {user.name} · {user.role === "ADMIN" ? "مدير" : "محرر"}
-              </div>
-              <IconButton icon={LogOut} tone="ghost" disabled={logout.isPending} onClick={() => logout.mutate()}>
-                خروج
-              </IconButton>
-            </div>
+            {navigation}
           </div>
-          <nav className="mt-3 flex gap-2 overflow-x-auto pb-1 lg:hidden">
-            {visibleNav.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.to === "/"}
-                className={({ isActive }) =>
-                  `inline-flex shrink-0 items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium ${
-                    isActive ? "border-teal bg-teal text-white" : "border-slate-200 text-slate-600"
-                  }`
-                }
-              >
-                <item.icon className="h-4 w-4" />
-                {item.label}
-              </NavLink>
-            ))}
-          </nav>
+        </div>
+      ) : null}
+
+      <div className="lg:pr-60">
+        <header className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-slate-200 bg-white/90 px-4 py-2.5 backdrop-blur sm:px-6">
+          <div className="flex items-center gap-2 lg:hidden">
+            <button type="button" aria-label="فتح القائمة" aria-expanded={menuOpen} className="rounded-md p-2 text-slate-600 hover:bg-slate-100" onClick={() => setMenuOpen(true)}><Menu className="h-5 w-5" /></button>
+            <span className="text-base font-bold text-teal">وكيل المحتوى</span>
+          </div>
+          <div className="hidden lg:block" />
+          <div className="flex items-center gap-3">
+            <div className="text-end leading-tight">
+              <p className="text-sm font-medium">{user.name}</p>
+              <p className="text-xs text-slate-500">{user.role === "ADMIN" ? "مدير" : "محرر"}</p>
+            </div>
+            <IconButton icon={LogOut} tone="ghost" disabled={logout.isPending} onClick={() => logout.mutate()}>
+              خروج
+            </IconButton>
+          </div>
         </header>
-        <main className="mx-auto max-w-7xl px-5 py-6">
+        <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
           <Outlet context={{ user }} />
         </main>
       </div>

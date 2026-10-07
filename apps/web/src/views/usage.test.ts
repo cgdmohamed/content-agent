@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { budgetTone, reconcile, usd } from "./Usage";
+import { budgetTone, fillDays, reconcile, usd } from "./Usage";
 
 describe("usage formatting", () => {
   it("shows small amounts with millidollar precision so cheap calls are not rounded to zero", () => {
@@ -23,5 +23,15 @@ describe("usage formatting", () => {
     expect(reconcile(0.45, 0.03).deltaUsd).toBe(0.42);
     expect(reconcile(0, 0).status).toBe("match");
     expect(reconcile(1.2, 0).status).toBe("off");
+  });
+
+  it("fills days without spend so the chart shows the whole period", () => {
+    const days = fillDays([{ date: "2026-10-02", costUsd: 0.5 }], "2026-10-01", "2026-10-04");
+    expect(days).toEqual([
+      { date: "2026-10-01", costUsd: 0 },
+      { date: "2026-10-02", costUsd: 0.5 },
+      { date: "2026-10-03", costUsd: 0 },
+      { date: "2026-10-04", costUsd: 0 }
+    ]);
   });
 });

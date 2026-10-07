@@ -6,17 +6,15 @@ export function modelKeyOf(ref: ModelRefDto): string {
 }
 
 export function modelOptionLabel(spec: ModelSpecDto): string {
-  const price =
-    spec.kind === "image"
-      ? `${spec.imageUsd ?? "؟"}$ / صورة`
-      : `${spec.inputPerM ?? "؟"}$ دخل · ${spec.outputPerM ?? "؟"}$ خرج / مليون توكن`;
-  const notes = [spec.estimated ? "سعر تقديري" : null, spec.providerConfigured ? null : "المفتاح غير مهيأ"].filter(Boolean).join("، ");
-  return `${spec.label} — ${price}${notes ? ` (${notes})` : ""}`;
+  // Text prices are USD per million tokens (input/output); image prices are per image.
+  const price = spec.kind === "image" ? `$${spec.imageUsd ?? "؟"}/صورة` : `$${spec.inputPerM ?? "؟"}/$${spec.outputPerM ?? "؟"}`;
+  const notes = [spec.estimated ? "تقديري" : null, spec.providerConfigured ? null : "بلا مفتاح"].filter(Boolean).join("، ");
+  return `${spec.label} · ${price}${notes ? ` (${notes})` : ""}`;
 }
 
 const fieldName = (prefix: string, operation: string, index: number): string => `${prefix}:${operation}:${index}`;
 
-/** Primary + fallback model selects for every operation. Read the result with readOperationModels(). */
+/** One row per operation: a primary model and an optional fallback. Read the result with readOperationModels(). */
 export function OperationModelPickers(props: {
   prefix: string;
   operations: ModelOperationDto[];
@@ -25,34 +23,40 @@ export function OperationModelPickers(props: {
   /** Label of the empty option, e.g. "افتراضي النظام". */
   emptyLabel: string;
 }): ReactElement {
+  const selectClass = "w-full min-w-0 rounded-md border border-slate-200 bg-white px-2 py-2 text-sm";
   return (
-    <div className="grid gap-4 md:grid-cols-2">
-      {props.operations.map((operation) => {
-        const options = props.catalog.filter((spec) => spec.kind === operation.kind);
-        const chain = props.value[operation.key] ?? [];
-        return (
-          <fieldset key={operation.key} className="rounded-md border border-slate-200 p-3">
-            <legend className="px-1 text-sm font-semibold text-slate-700">{operation.label}</legend>
-            {[0, 1].map((index) => (
-              <label key={index} className="mt-2 block">
-                <span className="text-xs font-medium text-slate-500">{index === 0 ? "الموديل الأساسي" : "بديل عند الفشل"}</span>
+    <div className="overflow-hidden rounded-md border border-slate-200">
+      <div className="hidden grid-cols-[10rem_minmax(0,1fr)_minmax(0,1fr)] gap-3 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-500 md:grid">
+        <span>العملية</span>
+        <span>الموديل الأساسي</span>
+        <span>بديل عند الفشل</span>
+      </div>
+      <ul className="divide-y divide-slate-100">
+        {props.operations.map((operation) => {
+          const options = props.catalog.filter((spec) => spec.kind === operation.kind);
+          const chain = props.value[operation.key] ?? [];
+          return (
+            <li key={operation.key} className="grid gap-2 px-3 py-2.5 md:grid-cols-[10rem_minmax(0,1fr)_minmax(0,1fr)] md:items-center md:gap-3">
+              <span className="text-sm font-medium text-slate-700">{operation.label}</span>
+              {[0, 1].map((index) => (
                 <select
+                  key={index}
                   name={fieldName(props.prefix, operation.key, index)}
+                  aria-label={`${operation.label}: ${index === 0 ? "الموديل الأساسي" : "بديل عند الفشل"}`}
                   defaultValue={chain[index] ? modelKeyOf(chain[index]!) : ""}
-                  className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm"
+                  className={selectClass}
                 >
                   <option value="">{index === 0 ? props.emptyLabel : "بدون بديل"}</option>
                   {options.map((spec) => (
-                    <option key={modelKeyOf(spec)} value={modelKeyOf(spec)}>
-                      {modelOptionLabel(spec)}
-                    </option>
+                    <option key={modelKeyOf(spec)} value={modelKeyOf(spec)}>{modelOptionLabel(spec)}</option>
                   ))}
                 </select>
-              </label>
-            ))}
-          </fieldset>
-        );
-      })}
+              ))}
+            </li>
+          );
+        })}
+      </ul>
+      <p className="border-t border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-500">الأسعار بالدولار لكل مليون توكن (دخل/خرج)، وللصور لكل صورة.</p>
     </div>
   );
 }

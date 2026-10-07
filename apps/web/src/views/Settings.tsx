@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent, type ReactElement } from "react";
 import { api, type ModelSpecDto, type ProviderStatusDto } from "../api/client";
 import { OperationModelPickers, readOperationModels } from "../ui/ModelPickers";
+import { PageHeader } from "../ui/PageHeader";
+import { Pill } from "../ui/Pill";
 import { ActionError, ErrorState, LoadingState } from "../ui/StateViews";
 
 export function Settings(): ReactElement {
@@ -80,40 +82,71 @@ export function Settings(): ReactElement {
     });
   }
 
+  const providers: Array<[string, ProviderStatusDto]> = [
+    ["أوبن إيه آي", settings.data.providers.openai],
+    ["أنثروبيك", settings.data.providers.anthropic],
+    ["بيربلكسيتي", settings.data.providers.perplexity],
+    ["جيميني للصور", settings.data.providers.gemini]
+  ];
   return (
-    <div className="space-y-4">
-      <form onSubmit={submit} noValidate className="rounded-lg border border-slate-200 bg-white p-5">
-        <h2 className="text-lg font-semibold">الإعدادات</h2>
-        <div className="mt-5 grid gap-4 md:grid-cols-2">
-          <Input name="monthlyAiBudgetUsd" label="ميزانية الذكاء الاصطناعي الشهرية بالدولار" type="number" defaultValue={settings.data.monthlyAiBudgetUsd} min={0} step="0.01" />
-          <Input name="monthlyAiHardLimitUsd" label="حد الإيقاف الصارم بالدولار" type="number" defaultValue={settings.data.monthlyAiHardLimitUsd} min={0} step="0.01" />
+    <form onSubmit={submit} noValidate className="space-y-5 pb-20">
+      <PageHeader title="الإعدادات" description="الميزانية، والموديل المستخدم لكل عملية، وأسعار الموديلات." />
+
+      <section className="rounded-lg border border-slate-200 bg-white p-5">
+        <h2 className="text-base font-semibold">المزودون</h2>
+        <ul className="mt-3 grid gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-4">
+          {providers.map(([label, status]) => (
+            <li key={label} className="flex items-center justify-between gap-2 text-sm">
+              <span>{label}</span>
+              <Pill tone={status.configured ? "ok" : "muted"} label={status.configured ? `مهيأ ${status.maskedKey?.slice(-4) ?? ""}` : "غير مهيأ"} />
+            </li>
+          ))}
+        </ul>
+        <p className="mt-3 text-xs text-slate-500">مفاتيح المزودين تحفظ في متغيرات البيئة ولا تظهر هنا إلا آخر أربعة أحرف.</p>
+      </section>
+
+      <section className="rounded-lg border border-slate-200 bg-white p-5">
+        <h2 className="text-base font-semibold">الميزانية والمحتوى</h2>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Input name="monthlyAiBudgetUsd" label="الميزانية الشهرية ($)" type="number" defaultValue={settings.data.monthlyAiBudgetUsd} min={0} step="0.01" />
+          <Input name="monthlyAiHardLimitUsd" label="حد الإيقاف الصارم ($)" type="number" defaultValue={settings.data.monthlyAiHardLimitUsd} min={0} step="0.01" />
           <Input name="defaultIdeasCount" label="عدد الأفكار الافتراضي" type="number" defaultValue={settings.data.defaultIdeasCount} min={1} max={20} step="1" />
           <Input name="defaultMarket" label="السوق الافتراضي" defaultValue={settings.data.defaultMarket} maxLength={20} />
-          <label className="flex items-center gap-3 rounded-md border border-slate-200 px-3 py-2 text-sm md:col-span-2">
-            <input name="autoPublishAfterApproval" type="checkbox" defaultChecked={settings.data.autoPublishAfterApproval} className="h-4 w-4" />
-            <span>النشر التلقائي بعد اعتماد المدير</span>
-          </label>
         </div>
-        <div className="mt-6">
-          <h3 className="text-sm font-semibold text-slate-700">الموديل لكل عملية</h3>
-          <p className="mt-1 text-xs text-slate-500">اختر الموديل الأساسي وبديلًا عند الفشل لكل عملية. "افتراضي النظام" يعني الترتيب والموديلات من متغيرات البيئة. يمكن تخصيصها لكل موقع من شاشة المواقع.</p>
-          <div className="mt-3">
-            <OperationModelPickers prefix="model" operations={settings.data.modelOperations} catalog={settings.data.modelCatalog} value={settings.data.operationModels} emptyLabel="افتراضي النظام" />
-          </div>
-          <label className="mt-4 block max-w-xs">
-            <span className="text-sm font-medium text-slate-600">دقة الصورة المميزة</span>
-            <select name="imageSize" defaultValue={settings.data.imageSize ?? ""} className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm">
-              <option value="">افتراضي الموديل</option>
-              <option value="1K">1K (الأرخص)</option>
-              <option value="2K">2K</option>
-              <option value="4K">4K (الأغلى)</option>
-            </select>
-            <span className="mt-1 block text-xs text-slate-500">الدقة الأعلى ترفع سعر الصورة. بعض الموديلات القديمة لا تدعم هذا الخيار.</span>
-          </label>
+        <label className="mt-4 flex items-center gap-3 text-sm">
+          <input name="autoPublishAfterApproval" type="checkbox" defaultChecked={settings.data.autoPublishAfterApproval} className="h-4 w-4" />
+          النشر التلقائي بعد اعتماد المدير
+        </label>
+      </section>
+
+      <section className="rounded-lg border border-slate-200 bg-white p-5">
+        <h2 className="text-base font-semibold">الموديل لكل عملية</h2>
+        <p className="mt-1 text-sm text-slate-500">"افتراضي النظام" يعني الترتيب والموديلات من متغيرات البيئة. يمكن تخصيصها لكل موقع من شاشة المواقع.</p>
+        <div className="mt-4">
+          <OperationModelPickers prefix="model" operations={settings.data.modelOperations} catalog={settings.data.modelCatalog} value={settings.data.operationModels} emptyLabel="افتراضي النظام" />
         </div>
-        <div className="mt-6">
-          <h3 className="text-sm font-semibold text-slate-700">موديلات مخصصة وأسعارها</h3>
-          <p className="mt-1 text-xs text-slate-500">أضف أي موديل جديد أو صحّح سعر موديل موجود (نفس المعرّف يستبدل السعر الافتراضي). الأسعار تُستخدم لحساب الميزانية. بعد الحفظ يظهر الموديل في القوائم أعلاه.</p>
+        <label className="mt-4 block max-w-xs">
+          <span className="text-sm font-medium text-slate-600">دقة الصورة المميزة</span>
+          <select name="imageSize" defaultValue={settings.data.imageSize ?? ""} className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm">
+            <option value="">افتراضي الموديل</option>
+            <option value="1K">1K (الأرخص)</option>
+            <option value="2K">2K</option>
+            <option value="4K">4K (الأغلى)</option>
+          </select>
+          <span className="mt-1 block text-xs text-slate-500">الدقة الأعلى ترفع سعر الصورة. بعض الموديلات القديمة لا تدعم هذا الخيار.</span>
+        </label>
+      </section>
+
+      <details className="group rounded-lg border border-slate-200 bg-white">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-5">
+          <span>
+            <span className="block text-base font-semibold">موديلات مخصصة وأسعارها</span>
+            <span className="block text-sm text-slate-500">أضف موديلًا جديدًا أو صحّح سعر موديل موجود. {custom.length > 0 ? `لديك ${custom.length} موديل مخصص.` : "لا توجد موديلات مخصصة."}</span>
+          </span>
+          <span aria-hidden="true" className="text-slate-400 transition group-open:rotate-180">⌄</span>
+        </summary>
+        <div className="border-t border-slate-100 p-5">
+          <p className="text-xs text-slate-500">نفس المعرّف يستبدل السعر الافتراضي. الأسعار تُستخدم لحساب الميزانية، وبعد الحفظ يظهر الموديل في القوائم أعلاه.</p>
           {custom.length > 0 ? (
             <ul className="mt-3 space-y-1 text-sm">
               {custom.map((spec) => (
@@ -158,27 +191,19 @@ export function Settings(): ReactElement {
             <div className="flex items-end"><button type="button" onClick={addCustomModel} className="rounded-md border border-teal px-3 py-2 text-sm font-semibold text-teal">إضافة</button></div>
           </div>
         </div>
-        <div className="mt-5 flex items-center gap-3">
-          <button className="rounded-md bg-teal px-4 py-2 text-sm font-semibold text-white" disabled={updateSettings.isPending}>
+      </details>
+
+      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur lg:pr-64">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-3 sm:px-2">
+          <button className="rounded-md bg-teal px-5 py-2 text-sm font-semibold text-white disabled:opacity-60" disabled={updateSettings.isPending}>
             {updateSettings.isPending ? "جاري الحفظ..." : "حفظ الإعدادات"}
           </button>
           {saved ? <span className="text-sm text-teal">تم الحفظ.</span> : null}
+          {localError ? <span role="alert" className="text-sm text-red-600">{localError}</span> : null}
+          <ActionError error={updateSettings.error} />
         </div>
-        {localError ? <p className="mt-3 text-sm text-red-600">{localError}</p> : null}
-        <div className="mt-3"><ActionError error={updateSettings.error} /></div>
-      </form>
-
-      <div className="rounded-lg border border-slate-200 bg-white p-5">
-        <h3 className="font-semibold">حالة المزودين</h3>
-        <div className="mt-4 grid gap-3 md:grid-cols-4">
-          <Provider label="أوبن إيه آي" status={settings.data.providers.openai} />
-          <Provider label="أنثروبيك" status={settings.data.providers.anthropic} />
-          <Provider label="بيربلكسيتي" status={settings.data.providers.perplexity} />
-          <Provider label="جيميني للصور" status={settings.data.providers.gemini} />
-        </div>
-        <p className="mt-4 text-sm text-slate-500">مفاتيح المزودين تحفظ في متغيرات البيئة، ولا يظهر هنا إلا آخر جزء مقنّع للتحقق التشغيلي.</p>
       </div>
-    </div>
+    </form>
   );
 }
 
@@ -197,16 +222,5 @@ function Input(props: { name: string; label: string; type?: string; defaultValue
         className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
       />
     </label>
-  );
-}
-
-function Provider(props: { label: string; status: ProviderStatusDto }): ReactElement {
-  return (
-    <div className="rounded-md border border-slate-200 p-3 text-sm">
-      <p className="font-medium">{props.label}</p>
-      <p className={props.status.configured ? "mt-1 text-teal" : "mt-1 text-slate-500"}>{props.status.configured ? "مهيأ" : "غير مهيأ"}</p>
-      <p className="mt-2 text-xs text-slate-500">المفتاح: {props.status.maskedKey ?? "غير محفوظ"}</p>
-      <p className="mt-1 text-xs text-slate-500">الموديل: {props.status.model ?? "غير محدد"}</p>
-    </div>
   );
 }

@@ -16,7 +16,7 @@ test("shows an error for wrong credentials and signs in with the right ones", as
   await expect(page.getByText("بيانات الدخول غير صحيحة")).toBeVisible();
 
   await login(page);
-  await expect(page.getByRole("heading", { name: "منصة انتاج المحتوى" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "لوحة التحكم" })).toBeVisible();
   await expect(page.getByRole("link", { name: "مكتبة المحتوى" })).toBeVisible();
 });
 
@@ -44,7 +44,7 @@ test("an admin adds a site and creates content that queues the first job", async
 test("an admin sees per-site usage and activity", async ({ page }) => {
   await login(page);
   await page.getByRole("link", { name: "الاستهلاك" }).first().click();
-  await expect(page.getByRole("heading", { name: "الاستهلاك والنشاط لكل موقع" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "الاستهلاك", exact: true })).toBeVisible();
   await expect(page.getByText("ميزانية الشهر الحالي")).toBeVisible();
   await page.getByRole("button", { name: "موقع التجربة" }).click();
   await expect(page.getByText("ماذا حدث وكم استهلك")).toBeVisible();

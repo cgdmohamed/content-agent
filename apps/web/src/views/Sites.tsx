@@ -6,6 +6,9 @@ import { api } from "../api/client";
 import type { SiteDto } from "../api/client";
 import { useCurrentUser } from "../auth";
 import { IconButton } from "../ui/IconButton";
+import { PageHeader } from "../ui/PageHeader";
+import { integrationTone, Pill } from "../ui/Pill";
+import { RowMenu } from "../ui/RowMenu";
 import { integrationLabels } from "../ui/labels";
 import { AllowedModelsPicker, OperationModelPickers, readOperationModels } from "../ui/ModelPickers";
 import { ActionError, EmptyState, ErrorState, LoadingState } from "../ui/StateViews";
@@ -118,10 +121,11 @@ export function Sites(): ReactElement {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">المواقع</h2>
-        {isAdmin ? <IconButton icon={FilePlus2} tone="primary" onClick={() => setFormOpen((value) => !value)}>إضافة موقع</IconButton> : null}
-      </div>
+      <PageHeader
+        title="المواقع"
+        description="مواقع ووردبريس المرتبطة، وحالة الاتصال بكل خدمة."
+        actions={isAdmin ? <IconButton icon={FilePlus2} tone="primary" onClick={() => setFormOpen((value) => !value)}>إضافة موقع</IconButton> : null}
+      />
       {formOpen && isAdmin ? (
         <form onSubmit={submit} noValidate className="grid gap-3 rounded-lg border border-slate-200 bg-white p-5 md:grid-cols-2">
           <Input name="name" label="اسم الموقع" required />
@@ -190,58 +194,60 @@ export function Sites(): ReactElement {
           <div className="md:col-span-2"><ActionError error={updateSite.error} /></div>
         </form>
       ) : null}
-      <div className="grid gap-4 md:grid-cols-2">
+      <ul className="grid gap-4 md:grid-cols-2">
         {sites.data.map((site) => (
-          <div key={site.id} className="rounded-lg border border-slate-200 bg-white p-5">
-            <div className="flex items-start gap-3">
-              <Globe2 className="mt-1 h-5 w-5 text-teal" />
-              <div>
-                <h3 className="font-semibold">{site.name}</h3>
-                <p className="text-sm text-slate-500">{site.wordpressUrl}</p>
+          <li key={site.id} className="flex flex-col rounded-lg border border-slate-200 bg-white p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="truncate text-base font-semibold">{site.name}</h2>
+                <p className="truncate text-sm text-slate-500" dir="ltr" style={{ textAlign: "right" }}>{site.wordpressUrl}</p>
               </div>
+              <Pill tone={site.status === "ACTIVE" ? "ok" : "bad"} label={site.status === "ACTIVE" ? "نشط" : "معطل"} />
             </div>
-            <dl className="mt-5 grid grid-cols-2 gap-3 text-sm">
-              <div><dt className="text-slate-500">السوق</dt><dd>{site.market}</dd></div>
-              <div><dt className="text-slate-500">اللغة</dt><dd>{languageLabel(site.language)}</dd></div>
-              <div><dt className="text-slate-500">الحالة</dt><dd className={site.status === "ACTIVE" ? "text-teal" : "text-red-700"}>{site.status === "ACTIVE" ? "نشط" : "معطل"}</dd></div>
-              <div><dt className="text-slate-500">ووردبريس</dt><dd>{integrationLabels[site.wordpressStatus]}</dd></div>
-              <div><dt className="text-slate-500">رانك ماث</dt><dd>{integrationLabels[site.rankMathStatus]}</dd></div>
-              <div><dt className="text-slate-500">بحث جوجل</dt><dd>{integrationLabels[site.gscStatus]}</dd></div>
-              <div><dt className="text-slate-500">المنشور</dt><dd>{site.publishedCount}</dd></div>
+            <dl className="mt-4 grid grid-cols-3 gap-2 text-sm">
+              <div><dt className="text-xs text-slate-500">ووردبريس</dt><dd className="mt-1"><Pill tone={integrationTone(site.wordpressStatus)} label={integrationLabels[site.wordpressStatus]} /></dd></div>
+              <div><dt className="text-xs text-slate-500">رانك ماث</dt><dd className="mt-1"><Pill tone={integrationTone(site.rankMathStatus)} label={integrationLabels[site.rankMathStatus]} /></dd></div>
+              <div><dt className="text-xs text-slate-500">بحث جوجل</dt><dd className="mt-1"><Pill tone={integrationTone(site.gscStatus)} label={integrationLabels[site.gscStatus]} /></dd></div>
             </dl>
-            <div className="mt-5 flex flex-wrap gap-2">
+            <p className="mt-4 text-sm text-slate-500">
+              {site.market} · {languageLabel(site.language)} · <span className="tabular-nums">{site.publishedCount}</span> منشور من <span className="tabular-nums">{site.contentCount}</span>
+            </p>
+            <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-4">
+              <div className="flex flex-wrap items-center gap-1">
+                <Link className="rounded-md px-3 py-1.5 text-sm font-medium text-teal hover:bg-teal/10" to="/content">المحتوى</Link>
+                {isAdmin ? <Link className="rounded-md px-3 py-1.5 text-sm font-medium text-teal hover:bg-teal/10" to={`/usage?site=${site.id}`}>الاستهلاك</Link> : null}
+                {isAdmin ? <Link className="rounded-md px-3 py-1.5 text-sm font-medium text-teal hover:bg-teal/10" to={`/sites/${site.id}/report`}>التقرير</Link> : null}
+              </div>
               {isAdmin ? (
-                <>
-                  <IconButton icon={Wifi} onClick={() => testWp.mutate(site.id)}>اختبار ووردبريس</IconButton>
+                <div className="flex items-center gap-1">
                   <IconButton icon={SquarePen} onClick={() => setEditingSite(site)}>تعديل</IconButton>
-                  <IconButton icon={Settings2} onClick={() => testRankMath.mutate(site.id)}>اختبار رانك ماث</IconButton>
-                  <IconButton icon={SearchCheck} onClick={() => testGsc.mutate(site.id)}>اختبار بحث جوجل</IconButton>
-                  <IconButton icon={RefreshCw} onClick={() => syncGsc.mutate(site.id)}>مزامنة بحث جوجل</IconButton>
-                  <IconButton
-                    icon={Power}
-                    disabled={updateSite.isPending}
-                    onClick={() => updateSite.mutate({ id: site.id, body: { status: site.status === "ACTIVE" ? "DISABLED" : "ACTIVE" } })}
-                  >
-                    {site.status === "ACTIVE" ? "تعطيل" : "تفعيل"}
-                  </IconButton>
-                  <IconButton icon={Trash2} tone="danger" disabled={deleteSite.isPending} onClick={() => setDeleteTarget(site)}>حذف</IconButton>
-                </>
+                  <RowMenu
+                    label={`المزيد لـ ${site.name}`}
+                    actions={[
+                      { label: "اختبار ووردبريس", icon: Wifi, onClick: () => testWp.mutate(site.id) },
+                      { label: "اختبار رانك ماث", icon: Settings2, onClick: () => testRankMath.mutate(site.id) },
+                      { label: "اختبار بحث جوجل", icon: SearchCheck, onClick: () => testGsc.mutate(site.id) },
+                      { label: "مزامنة بحث جوجل", icon: RefreshCw, onClick: () => syncGsc.mutate(site.id) },
+                      { label: site.status === "ACTIVE" ? "تعطيل الموقع" : "تفعيل الموقع", icon: Power, disabled: updateSite.isPending, onClick: () => updateSite.mutate({ id: site.id, body: { status: site.status === "ACTIVE" ? "DISABLED" : "ACTIVE" } }) },
+                      { label: "حذف الموقع", icon: Trash2, danger: true, disabled: deleteSite.isPending, onClick: () => setDeleteTarget(site) }
+                    ]}
+                  />
+                </div>
               ) : null}
-              <Link className="inline-flex min-h-9 items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm font-semibold hover:border-teal/40 hover:bg-slate-50" to="/content"><Edit3 className="h-4 w-4" />إنشاء محتوى</Link>
-              {isAdmin ? <Link className="inline-flex min-h-9 items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm font-semibold hover:border-teal/40 hover:bg-slate-50" to={`/sites/${site.id}/report`}><BarChart3 className="h-4 w-4" />عرض التقرير</Link> : null}
-              {isAdmin ? <Link className="inline-flex min-h-9 items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm font-semibold hover:border-teal/40 hover:bg-slate-50" to={`/usage?site=${site.id}`}><CircleDollarSign className="h-4 w-4" />الاستهلاك والنشاط</Link> : null}
             </div>
-            {isAdmin ? <div className="mt-3 space-y-2">
-              <ActionError error={testWp.variables === site.id ? testWp.error : null} />
-              <ActionError error={testRankMath.variables === site.id ? testRankMath.error : null} />
-              <ActionError error={testGsc.variables === site.id ? testGsc.error : null} />
-              <ActionError error={syncGsc.variables === site.id ? syncGsc.error : null} />
-              <ActionError error={updateSite.variables?.id === site.id ? updateSite.error : null} />
-              <ActionError error={deleteSite.variables === site.id ? deleteSite.error : null} />
-            </div> : null}
-          </div>
+            {isAdmin ? (
+              <div className="mt-3 space-y-2 empty:hidden">
+                <ActionError error={testWp.variables === site.id ? testWp.error : null} />
+                <ActionError error={testRankMath.variables === site.id ? testRankMath.error : null} />
+                <ActionError error={testGsc.variables === site.id ? testGsc.error : null} />
+                <ActionError error={syncGsc.variables === site.id ? syncGsc.error : null} />
+                <ActionError error={updateSite.variables?.id === site.id ? updateSite.error : null} />
+                <ActionError error={deleteSite.variables === site.id ? deleteSite.error : null} />
+              </div>
+            ) : null}
+          </li>
         ))}
-      </div>
+      </ul>
       {sites.data.length === 0 ? <EmptyState label="لا توجد مواقع مضافة بعد." /> : null}
       {deleteTarget ? (
         <DeleteSiteModal

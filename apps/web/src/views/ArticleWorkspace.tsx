@@ -10,7 +10,9 @@ import TiptapTableRow from "@tiptap/extension-table-row";
 import { Bold, Bot, Check, ExternalLink, Heading2, Heading3, Image, Italic, Link2, LinkIcon, List, ListOrdered, LoaderCircle, Network, Pilcrow, Quote, Redo2, RotateCcw, Rows3, Save, SearchCheck, Send, Sparkles, Table2, Undo2, UploadCloud, X } from "lucide-react";
 import { clearLocalDraft, readLocalDraft, saveLocalDraft } from "../draft-storage";
 import { forwardRef, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
+import { Pill } from "../ui/Pill";
+import { Tabs } from "../ui/Tabs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { nextPrimaryOperation, scoreContent, type ContentOperation, type ContentState } from "@content-agent/shared";
 import { api, type ContentActivityDto } from "../api/client";
@@ -42,6 +44,7 @@ export function ArticleWorkspace(): ReactElement {
   const [scheduledAt, setScheduledAt] = useState("");
   const [competitorModalOpen, setCompetitorModalOpen] = useState(false);
   const [imageDragActive, setImageDragActive] = useState(false);
+  const [sideTab, setSideTab] = useState<"seo" | "image" | "publish" | "history">("seo");
   const [recoverableDraft, setRecoverableDraft] = useState<string | null>(null);
   const draftCheckedRef = useRef(false);
   const content = useQuery({ queryKey: ["content", id], queryFn: () => api.contentItem(id), enabled: Boolean(id), refetchInterval: 5000 });
@@ -233,10 +236,11 @@ export function ArticleWorkspace(): ReactElement {
     <div className="space-y-5">
       <section className="rounded-lg border border-slate-200 bg-white p-5">
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <p className="text-sm font-medium text-teal">مساحة تحرير المقال</p>
-            <h2 className="mt-1 text-2xl font-semibold">{content.data.title}</h2>
+          <div className="min-w-0">
+            <Link to="/content" className="text-sm text-teal hover:underline">← مكتبة المحتوى</Link>
+            <h1 className="mt-1 text-xl font-semibold">{content.data.title}</h1>
           </div>
+          <div className="flex flex-wrap items-center gap-2">
           <button
             className="inline-flex items-center gap-2 rounded-md bg-teal px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
             disabled={!isRunnableArticleOperation(currentState, primaryOperation, user.role === "ADMIN") || runPrimary.isPending}
@@ -255,6 +259,7 @@ export function ArticleWorkspace(): ReactElement {
             {saveArticle.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             {saveArticle.isPending ? "جاري الحفظ..." : "حفظ"}
           </button>
+          </div>
         </div>
         {activeAction ? (
           <div className="mt-4 flex items-center gap-2 rounded-md border border-teal/25 bg-teal/5 px-3 py-2 text-sm font-medium text-teal">
@@ -314,7 +319,20 @@ export function ArticleWorkspace(): ReactElement {
           </div>
         </div>
 
-        <aside className="space-y-4">
+        <aside className="space-y-4 xl:sticky xl:top-20 xl:max-h-[calc(100vh-6rem)] xl:self-start xl:overflow-y-auto">
+          <Tabs
+            label="أقسام المقال"
+            value={sideTab}
+            onChange={setSideTab}
+            items={[
+              { id: "seo", label: "التحسين" },
+              { id: "image", label: "الصورة" },
+              { id: "publish", label: "النشر" },
+              { id: "history", label: "السجل" }
+            ]}
+          />
+          {sideTab === "seo" ? (
+          <>
           <Panel title="تحسين محركات البحث">
             <OptimizationChecks html={content.data.draftHtml} score={score.score} />
             <button
@@ -345,15 +363,15 @@ export function ArticleWorkspace(): ReactElement {
             </div>
           </Panel>
 
+          </>
+          ) : null}
+          {sideTab === "image" ? (
+          <>
           <Panel title="الصورة">
             <div className="flex gap-2">
               <button className="inline-flex flex-1 items-center justify-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" onClick={() => generateImage.mutate()} disabled={generateImage.isPending}>
                 {generateImage.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Image className="h-4 w-4" />}
-                {generateImage.isPending ? "جاري التوليد..." : "توليد"}
-              </button>
-              <button className="inline-flex flex-1 items-center justify-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" onClick={() => generateImage.mutate()} disabled={generateImage.isPending}>
-                {generateImage.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
-                {generateImage.isPending ? "جاري..." : "إعادة التوليد"}
+                {generateImage.isPending ? "جاري التوليد..." : content.data.imageUrl ? "إعادة توليد الصورة" : "توليد صورة"}
               </button>
               <button className="inline-flex flex-1 items-center justify-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" onClick={() => skipImage.mutate()} disabled={skipImage.isPending}>
                 {skipImage.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
@@ -407,6 +425,10 @@ export function ArticleWorkspace(): ReactElement {
             <Field ref={imageAltRef} label="النص البديل" value={content.data.imageAlt} />
           </Panel>
 
+          </>
+          ) : null}
+          {sideTab === "publish" ? (
+          <>
           <Panel title="النشر">
             <div className="rounded-md bg-slate-50 px-3 py-2 text-sm">
               <span className="text-slate-500">الحالة الحالية: </span>
@@ -458,6 +480,10 @@ export function ArticleWorkspace(): ReactElement {
             ))}
           </Panel>
 
+          </>
+          ) : null}
+          {sideTab === "history" ? (
+          <>
           <Panel title="الإصدارات">
             {content.data.versions.length === 0 ? (
               <p className="text-sm text-slate-500">لم يتم حفظ إصدارات يدوية بعد.</p>
@@ -497,6 +523,8 @@ export function ArticleWorkspace(): ReactElement {
               </div>
             )}
           </Panel>
+          </>
+          ) : null}
         </aside>
       </section>
       {competitorModalOpen ? (
@@ -701,20 +729,23 @@ function OptimizationChecks({ html, score }: { html: string; score: number }): R
   ];
 
   return (
-    <div className="grid gap-2 sm:grid-cols-2">
+    <ul className="divide-y divide-slate-100 text-sm">
       {checks.map((item) => {
         const Icon = item.icon;
         return (
-          <div key={item.label} className={`rounded-md border px-3 py-2 ${item.ok ? "border-teal/30 bg-teal/5" : "border-amber-200 bg-amber-50"}`}>
-            <div className="flex items-center gap-2">
-              <Icon className={`h-4 w-4 ${item.ok ? "text-teal" : "text-amber-700"}`} />
-              <span className="text-sm font-semibold">{item.label}</span>
-            </div>
-            <p className="mt-1 text-xs text-slate-600">{item.detail}</p>
-          </div>
+          <li key={item.label} className="flex items-center justify-between gap-3 py-2">
+            <span className="flex min-w-0 items-center gap-2">
+              <Icon className="h-4 w-4 shrink-0 text-slate-400" />
+              <span className="min-w-0">
+                <span className="block font-medium">{item.label}</span>
+                <span className="block truncate text-xs text-slate-500">{item.detail}</span>
+              </span>
+            </span>
+            <Pill tone={item.ok ? "ok" : "warn"} label={item.ok ? "مستوفى" : "ناقص"} />
+          </li>
         );
       })}
-    </div>
+    </ul>
   );
 }
 

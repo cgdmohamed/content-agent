@@ -4,6 +4,8 @@ import { Link, useSearchParams } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, type UsageOverviewDto, type UsageProviderRowDto, type UsageSiteRowDto } from "../api/client";
 import { providerLabels, usageOperationLabel } from "../ui/labels";
+import { PageHeader } from "../ui/PageHeader";
+import { Stat } from "../ui/Stat";
 import { EmptyState, ErrorState, LoadingState } from "../ui/StateViews";
 
 export function usd(value: number): string {
@@ -63,36 +65,38 @@ export function Usage(): ReactElement {
   const data = overview.data;
 
   return (
-    <div className="space-y-4">
-      <section className="rounded-lg border border-slate-200 bg-white p-5">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold">الاستهلاك والنشاط لكل موقع</h2>
-            <p className="text-sm text-slate-500">من {data.from} إلى {data.to} · التكلفة تقديرية بالدولار من أرقام الاستهلاك التي يرجعها كل مزود.</p>
-          </div>
-          <div className="flex flex-wrap items-end gap-2">
+    <div className="space-y-5">
+      <PageHeader
+        title="الاستهلاك"
+        description={`من ${data.from} إلى ${data.to}. التكلفة بالدولار من أرقام الاستهلاك التي يرجعها كل مزود.`}
+        actions={
+          <>
             <Preset label="هذا الشهر" onClick={() => { setFrom(monthStart()); setTo(isoDay(new Date())); }} />
             <Preset label="آخر 30 يومًا" onClick={() => { setFrom(isoDay(new Date(Date.now() - 29 * 86_400_000))); setTo(isoDay(new Date())); }} />
             <DateInput label="من" value={from} onChange={setFrom} />
             <DateInput label="إلى" value={to} onChange={setTo} />
-          </div>
-        </div>
-        <BudgetBar month={data.month} />
-        <div className="mt-4 grid gap-3 sm:grid-cols-3">
-          <Card label="إجمالي الاستهلاك في الفترة" value={usd(data.totalCostUsd)} />
-          <Card label="عدد استدعاءات الذكاء الاصطناعي" value={count(data.totalCalls)} />
-          <Card label="غير منسوب لموقع" value={usd(data.unattributedCostUsd)} hint={data.unattributedCalls > 0 ? `${count(data.unattributedCalls)} استدعاء (بيانات قديمة)` : undefined} />
-        </div>
-      </section>
-
-      <InvoiceReconciliation providers={data.byProvider} />
+          </>
+        }
+      />
 
       <section className="rounded-lg border border-slate-200 bg-white p-5">
-        <h3 className="font-semibold">المواقع</h3>
-        {data.sites.length === 0 ? <EmptyState label="لا توجد مواقع." /> : <SitesTable sites={data.sites} selected={selected} onSelect={select} />}
+        <div className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3">
+          <Stat label="الاستهلاك في الفترة" value={usd(data.totalCostUsd)} />
+          <Stat label="استدعاءات الذكاء الاصطناعي" value={count(data.totalCalls)} />
+          <Stat label="غير منسوب لموقع" value={usd(data.unattributedCostUsd)} hint={data.unattributedCalls > 0 ? `${count(data.unattributedCalls)} استدعاء قديم` : undefined} />
+        </div>
+        <BudgetBar month={data.month} />
+      </section>
+
+      <section className="rounded-lg border border-slate-200 bg-white">
+        <h2 className="px-5 pt-5 text-base font-semibold">المواقع</h2>
+        {data.sites.length === 0 ? <div className="p-5"><EmptyState label="لا توجد مواقع." /></div> : <SitesTable sites={data.sites} selected={selected} onSelect={select} />}
       </section>
 
       {selected ? <SiteUsagePanel siteId={selected} from={from} to={to} onClose={() => select(null)} /> : null}
+
+      <InvoiceReconciliation providers={data.byProvider} />
+
     </div>
   );
 }
@@ -101,9 +105,16 @@ function InvoiceReconciliation(props: { providers: UsageProviderRowDto[] }): Rea
   const [invoices, setInvoices] = useState<Record<string, string>>({});
   if (props.providers.length === 0) return null;
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-5">
-      <h3 className="font-semibold">مطابقة الفواتير</h3>
-      <p className="mt-1 text-xs text-slate-500">أدخل المبلغ الذي تظهره لوحة كل مزود لنفس الفترة لتعرف إن كان حساب النظام مطابقًا. الفرق الكبير يعني سعرًا غير صحيح لموديل (عدّله من الإعدادات → موديلات مخصصة) أو استخدامًا خارج النظام على نفس المفتاح.</p>
+    <details className="group rounded-lg border border-slate-200 bg-white">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-5">
+        <span>
+          <span className="block text-base font-semibold">مطابقة الفواتير</span>
+          <span className="block text-sm text-slate-500">قارن حساب النظام بما تعرضه لوحة كل مزود لنفس الفترة.</span>
+        </span>
+        <span aria-hidden="true" className="text-slate-400 transition group-open:rotate-180">⌄</span>
+      </summary>
+      <div className="border-t border-slate-100 p-5">
+      <p className="text-xs text-slate-500">أدخل المبلغ الذي تظهره لوحة كل مزود لنفس الفترة لتعرف إن كان حساب النظام مطابقًا. الفرق الكبير يعني سعرًا غير صحيح لموديل (عدّله من الإعدادات → موديلات مخصصة) أو استخدامًا خارج النظام على نفس المفتاح.</p>
       <div className="mt-3 overflow-x-auto">
         <table className="w-full min-w-[640px] text-right text-sm">
           <thead className="text-xs text-slate-500">
@@ -132,7 +143,8 @@ function InvoiceReconciliation(props: { providers: UsageProviderRowDto[] }): Rea
           </tbody>
         </table>
       </div>
-    </section>
+      </div>
+    </details>
   );
 }
 
@@ -143,7 +155,7 @@ function BudgetBar(props: { month: UsageOverviewDto["month"] }): ReactElement {
   const tone = budgetTone(costUsd, budgetUsd, hardLimitUsd);
   const color = tone === "danger" ? "bg-red-500" : tone === "warn" ? "bg-amber-500" : "bg-teal";
   return (
-    <div className="mt-4 rounded-md border border-slate-200 p-4">
+    <div className="mt-5 border-t border-slate-100 pt-4">
       <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
         <span className="font-medium text-slate-700">ميزانية الشهر الحالي (UTC)</span>
         <span className="text-slate-600">{usd(costUsd)} من {usd(budgetUsd)} · الإيقاف الصارم عند {hardLimitUsd > 0 ? usd(hardLimitUsd) : "معطل"}</span>
@@ -158,48 +170,58 @@ function BudgetBar(props: { month: UsageOverviewDto["month"] }): ReactElement {
 
 function SitesTable(props: { sites: UsageSiteRowDto[]; selected: string | null; onSelect: (id: string) => void }): ReactElement {
   return (
-    <div className="mt-3 overflow-x-auto">
-      <table className="w-full min-w-[760px] text-right text-sm">
+    <div className="mt-2 overflow-x-auto">
+      <table className="w-full min-w-[620px] text-right text-sm">
         <thead className="text-xs text-slate-500">
           <tr>
-            <th className="py-2">الموقع</th>
-            <th>الاستهلاك</th>
-            <th>الحصة</th>
-            <th>استدعاءات</th>
-            <th>فشل</th>
-            <th>صور</th>
-            <th>محتوى جديد</th>
-            <th>منشور</th>
-            <th>تكلفة المنشور</th>
+            <th className="px-5 py-2 font-medium">الموقع</th>
+            <th className="px-3 py-2 font-medium">الاستهلاك</th>
+            <th className="px-3 py-2 font-medium">الاستدعاءات</th>
+            <th className="px-3 py-2 font-medium">المحتوى</th>
+            <th className="px-5 py-2 font-medium">تكلفة المنشور</th>
           </tr>
         </thead>
-        <tbody>
+        <tbody className="divide-y divide-slate-100 tabular-nums">
           {props.sites.map((site) => (
-            <tr key={site.siteId} className={`border-t border-slate-100 ${props.selected === site.siteId ? "bg-teal/5" : ""}`}>
-              <td className="py-2">
-                <button type="button" className="font-semibold text-teal hover:underline" onClick={() => props.onSelect(site.siteId)}>{site.name}</button>
+            <tr key={site.siteId} className={props.selected === site.siteId ? "bg-teal/5" : "hover:bg-slate-50"}>
+              <td className="px-5 py-3">
+                <button type="button" className="font-semibold text-teal hover:underline" onClick={() => props.onSelect(site.siteId)} aria-pressed={props.selected === site.siteId}>{site.name}</button>
                 {site.status === "DELETED" ? <span className="mr-2 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">محذوف</span> : null}
               </td>
-              <td className="font-medium">{usd(site.costUsd)}{site.unconfirmedCostUsd > 0 ? <span className="mr-1 text-xs text-amber-700" title="استدعاءات لم تُغلق">*</span> : null}</td>
-              <td>
-                <div className="flex items-center gap-2">
-                  <div className="h-1.5 w-16 overflow-hidden rounded-full bg-slate-100"><div className="h-full bg-teal" style={{ width: `${Math.round(site.shareOfTotal * 100)}%` }} /></div>
-                  <span className="text-xs text-slate-500">{Math.round(site.shareOfTotal * 100)}%</span>
+              <td className="px-3 py-3">
+                <div className="flex items-center gap-3">
+                  <span className="w-16 font-medium">{usd(site.costUsd)}{site.unconfirmedCostUsd > 0 ? <span className="mr-0.5 text-amber-700" title="يتضمن استدعاءات لم تُغلق">*</span> : null}</span>
+                  <span className="hidden h-1.5 w-20 overflow-hidden rounded-full bg-slate-100 sm:block" role="img" aria-label={`${Math.round(site.shareOfTotal * 100)}% من الإجمالي`}>
+                    <span className="block h-full bg-teal" style={{ width: `${Math.round(site.shareOfTotal * 100)}%` }} />
+                  </span>
+                  <span className="hidden text-xs text-slate-400 sm:inline">{Math.round(site.shareOfTotal * 100)}%</span>
                 </div>
               </td>
-              <td>{count(site.calls)}</td>
-              <td className={site.failedCalls > 0 ? "text-red-600" : ""}>{count(site.failedCalls)}</td>
-              <td>{count(site.images)}</td>
-              <td>{count(site.contentCreated)}</td>
-              <td>{count(site.contentPublished)}</td>
-              <td>{site.costPerPublishedUsd === null ? "—" : usd(site.costPerPublishedUsd)}</td>
+              <td className="px-3 py-3">
+                {count(site.calls)}
+                {site.failedCalls > 0 ? <span className="mr-2 text-xs text-red-600">{count(site.failedCalls)} فشل</span> : null}
+              </td>
+              <td className="px-3 py-3">{count(site.contentCreated)} جديد<span className="text-slate-300"> · </span>{count(site.contentPublished)} منشور</td>
+              <td className="px-5 py-3">{site.costPerPublishedUsd === null ? "—" : usd(site.costPerPublishedUsd)}</td>
             </tr>
           ))}
         </tbody>
       </table>
-      <p className="mt-2 text-xs text-slate-500">* يتضمن استدعاءات بدأت ولم تُغلق (توقف العامل أثناءها): تُحتسب في الميزانية احتياطًا لأن المزود قد يكون حاسب عليها.</p>
+      <p className="px-5 pb-4 pt-1 text-xs text-slate-500">* يتضمن استدعاءات بدأت ولم تُغلق (توقف العامل أثناءها): تُحتسب في الميزانية احتياطًا لأن المزود قد يكون حاسب عليها.</p>
     </div>
   );
+}
+
+/** The chart should show every day of the period, including days with no spend. */
+export function fillDays(byDay: Array<{ date: string; costUsd: number }>, from: string, to: string): Array<{ date: string; costUsd: number }> {
+  const known = new Map(byDay.map((row) => [row.date, row.costUsd]));
+  const days: Array<{ date: string; costUsd: number }> = [];
+  const end = new Date(`${to}T00:00:00Z`);
+  for (let cursor = new Date(`${from}T00:00:00Z`); cursor <= end && days.length < 400; cursor = new Date(cursor.getTime() + 86_400_000)) {
+    const key = cursor.toISOString().slice(0, 10);
+    days.push({ date: key, costUsd: known.get(key) ?? 0 });
+  }
+  return days;
 }
 
 function SiteUsagePanel(props: { siteId: string; from: string; to: string; onClose: () => void }): ReactElement {
@@ -208,83 +230,82 @@ function SiteUsagePanel(props: { siteId: string; from: string; to: string; onClo
   if (usage.isError || !usage.data) return <ErrorState label="تعذر تحميل تفاصيل الموقع." />;
   const data = usage.data;
   const { totals, activity } = data;
+  const days = fillDays(data.byDay, data.from, data.to);
 
   return (
-    <section className="space-y-4 rounded-lg border border-teal/30 bg-white p-5">
+    <section aria-label={`تفاصيل ${data.siteName}`} className="space-y-5 rounded-lg border border-teal/30 bg-white p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h3 className="text-lg font-semibold">{data.siteName}</h3>
+          <h2 className="text-lg font-semibold">{data.siteName}</h2>
           <p className="text-sm text-slate-500">ماذا حدث وكم استهلك من {data.from} إلى {data.to}</p>
         </div>
         <div className="flex gap-2">
-          <Link className="rounded-md border border-slate-200 px-3 py-2 text-sm font-semibold hover:bg-slate-50" to={`/sites/${data.siteId}/report`}>تقرير الجودة</Link>
-          <button type="button" className="rounded-md border border-slate-200 px-3 py-2 text-sm font-semibold hover:bg-slate-50" onClick={props.onClose}>إغلاق</button>
+          <Link className="rounded-md border border-slate-200 px-3 py-2 text-sm font-medium hover:bg-slate-50" to={`/sites/${data.siteId}/report`}>تقرير الجودة</Link>
+          <button type="button" className="rounded-md border border-slate-200 px-3 py-2 text-sm font-medium hover:bg-slate-50" onClick={props.onClose}>إغلاق</button>
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Card label="الاستهلاك" value={usd(totals.costUsd)} hint={totals.unconfirmedCostUsd > 0 ? `منها ${usd(totals.unconfirmedCostUsd)} غير مؤكدة` : undefined} />
-        <Card label="الاستدعاءات" value={count(totals.calls)} hint={`نجح ${count(totals.successfulCalls)} · فشل ${count(totals.failedCalls)}`} />
-        <Card label="التوكنات" value={count(totals.inputTokens + totals.outputTokens + totals.cacheTokens)} hint={`دخل ${count(totals.inputTokens)} · خرج ${count(totals.outputTokens)}${totals.cacheTokens > 0 ? ` · كاش ${count(totals.cacheTokens)}` : ""}`} />
-        <Card label="صور مولّدة" value={count(totals.images)} />
-        <Card label="متوسط تكلفة المقال" value={totals.costPerArticleUsd === null ? "—" : usd(totals.costPerArticleUsd)} hint={`${count(totals.articlesWithUsage)} مقال`} />
-        <Card label="تكلفة المقال المنشور" value={totals.costPerPublishedUsd === null ? "—" : usd(totals.costPerPublishedUsd)} />
-        <Card label="تكلفة محتوى لم يُنشر" value={usd(totals.abandonedCostUsd)} hint="محذوف أو فاشل أو مكرر" />
-        <Card label="مهام مكتملة / فاشلة" value={`${count(activity.jobsCompleted)} / ${count(activity.jobsFailed)}`} hint={activity.jobsCancelled > 0 ? `ملغاة ${count(activity.jobsCancelled)}` : undefined} />
+      <div className="grid grid-cols-2 gap-x-6 gap-y-4 lg:grid-cols-4">
+        <Stat label="الاستهلاك" value={usd(totals.costUsd)} hint={totals.unconfirmedCostUsd > 0 ? `منها ${usd(totals.unconfirmedCostUsd)} غير مؤكدة` : undefined} />
+        <Stat label="الاستدعاءات" value={count(totals.calls)} hint={`نجح ${count(totals.successfulCalls)} · فشل ${count(totals.failedCalls)}`} tone={totals.failedCalls > 0 ? "warn" : "default"} />
+        <Stat label="تكلفة المقال المنشور" value={totals.costPerPublishedUsd === null ? "—" : usd(totals.costPerPublishedUsd)} hint={totals.costPerArticleUsd === null ? undefined : `متوسط المقال ${usd(totals.costPerArticleUsd)}`} />
+        <Stat label="ذهب دون نشر" value={usd(totals.abandonedCostUsd)} hint="محتوى محذوف أو فاشل أو مكرر" tone={totals.abandonedCostUsd > 0 ? "warn" : "default"} />
       </div>
 
-      <div>
-        <h4 className="text-sm font-semibold text-slate-700">النشاط في الفترة</h4>
-        <div className="mt-2 grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          <Card label="محتوى جديد" value={count(activity.contentCreated)} />
-          <Card label="تم نشره" value={count(activity.contentPublished)} />
-          <Card label="مجدول الآن" value={count(activity.scheduledNow)} />
-          <Card label="داخل المسار الآن" value={count(activity.pipelineNow)} />
-          <Card label="فاشل الآن" value={count(activity.failedNow)} />
-        </div>
-      </div>
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-2 border-t border-slate-100 pt-4 text-sm sm:grid-cols-3 lg:grid-cols-6">
+        <Fact label="محتوى جديد" value={count(activity.contentCreated)} />
+        <Fact label="تم نشره" value={count(activity.contentPublished)} />
+        <Fact label="مجدول الآن" value={count(activity.scheduledNow)} />
+        <Fact label="داخل المسار" value={count(activity.pipelineNow)} />
+        <Fact label="صور مولّدة" value={count(totals.images)} />
+        <Fact label="المهام" value={`${count(activity.jobsCompleted)} مكتملة · ${count(activity.jobsFailed)} فاشلة`} />
+        <Fact label="التوكنات" value={count(totals.inputTokens + totals.outputTokens + totals.cacheTokens)} />
+      </dl>
 
       <div>
-        <h4 className="text-sm font-semibold text-slate-700">الاستهلاك اليومي</h4>
+        <h3 className="text-sm font-semibold text-slate-700">الاستهلاك اليومي</h3>
         {data.byDay.length === 0 ? <EmptyState label="لا يوجد استهلاك في هذه الفترة." /> : (
-          <div className="mt-2 h-56" dir="ltr">
+          <div className="mt-2 h-48" dir="ltr">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={data.byDay}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="date" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} tickFormatter={(value: number) => `$${value}`} width={48} />
-                <Tooltip formatter={(value: number) => [usd(value), "الاستهلاك"]} />
-                <Bar dataKey="costUsd" fill="#0f766e" radius={[3, 3, 0, 0]} />
+              <BarChart data={days} margin={{ top: 8, right: 4, bottom: 0, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#64748b" }} tickFormatter={(value: string) => value.slice(5)} interval="preserveStartEnd" minTickGap={24} />
+                <YAxis tick={{ fontSize: 11, fill: "#64748b" }} tickFormatter={(value: number) => `$${value}`} width={44} />
+                <Tooltip formatter={(value: number) => [usd(value), "الاستهلاك"]} labelFormatter={(label: string) => label} cursor={{ fill: "#f1f5f9" }} />
+                <Bar dataKey="costUsd" fill="#0f766e" radius={[3, 3, 0, 0]} maxBarSize={22} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         )}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Table title="حسب العملية" head={["العملية", "استدعاءات", "فشل", "التكلفة"]} rows={data.byOperation.map((row) => [usageOperationLabel(row.operation), count(row.calls), count(row.failedCalls), usd(row.costUsd)])} />
-        <Table title="حسب الموديل" head={["الموديل", "استدعاءات", "توكنات", "التكلفة"]} rows={data.byModel.map((row) => [`${providerLabels[row.provider] ?? row.provider} · ${row.model}`, count(row.calls), count(row.inputTokens + row.outputTokens + row.cacheTokens), usd(row.costUsd)])} />
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Table title="حسب العملية" head={["العملية", "استدعاءات", "التكلفة"]} rows={data.byOperation.map((row) => [usageOperationLabel(row.operation), `${count(row.calls)}${row.failedCalls > 0 ? ` (${count(row.failedCalls)} فشل)` : ""}`, usd(row.costUsd)])} />
+        <Table title="حسب الموديل" head={["الموديل", "استدعاءات", "التكلفة"]} rows={data.byModel.map((row) => [`${providerLabels[row.provider] ?? row.provider} · ${row.model}`, count(row.calls), usd(row.costUsd)])} />
       </div>
 
       <div>
-        <h4 className="text-sm font-semibold text-slate-700">أعلى المقالات تكلفة</h4>
+        <h3 className="text-sm font-semibold text-slate-700">أعلى المقالات تكلفة</h3>
         {data.topContent.length === 0 ? <EmptyState label="لا توجد بيانات." /> : (
-          <ul className="mt-2 divide-y divide-slate-100 text-sm">
+          <ul className="mt-1 divide-y divide-slate-100 text-sm">
             {data.topContent.map((row) => (
               <li key={`${row.contentItemId ?? "deleted"}-${row.label}`} className="flex items-center justify-between gap-3 py-2">
-                <span>
+                <span className="min-w-0 truncate">
                   {row.contentItemId ? <Link className="text-teal hover:underline" to={`/content/${row.contentItemId}`}>{row.label}</Link> : row.label}
                   {row.deleted ? <span className="mr-2 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">محذوف</span> : null}
                 </span>
-                <span className="shrink-0 text-slate-600">{count(row.calls)} استدعاء · <strong>{usd(row.costUsd)}</strong></span>
+                <span className="shrink-0 tabular-nums text-slate-600">{count(row.calls)} استدعاء · <strong className="text-ink">{usd(row.costUsd)}</strong></span>
               </li>
             ))}
           </ul>
         )}
       </div>
 
-      <div>
-        <h4 className="text-sm font-semibold text-slate-700">آخر الأحداث على الموقع</h4>
+      <details className="group border-t border-slate-100 pt-4">
+        <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-semibold text-slate-700">
+          آخر الأحداث على الموقع ({data.recentActivity.length})
+          <span aria-hidden="true" className="text-slate-400 transition group-open:rotate-180">⌄</span>
+        </summary>
         {data.recentActivity.length === 0 ? <EmptyState label="لا توجد أحداث في هذه الفترة." /> : (
           <ul className="mt-2 divide-y divide-slate-100 text-sm">
             {data.recentActivity.map((event) => (
@@ -295,17 +316,16 @@ function SiteUsagePanel(props: { siteId: string; from: string; to: string; onClo
             ))}
           </ul>
         )}
-      </div>
+      </details>
     </section>
   );
 }
 
-function Card(props: { label: string; value: string; hint?: string | undefined }): ReactElement {
+function Fact(props: { label: string; value: string }): ReactElement {
   return (
-    <div className="rounded-md border border-slate-200 p-4">
-      <p className="text-xs text-slate-500">{props.label}</p>
-      <p className="mt-2 text-xl font-semibold">{props.value}</p>
-      {props.hint ? <p className="mt-1 text-xs text-slate-500">{props.hint}</p> : null}
+    <div>
+      <dt className="text-xs text-slate-500">{props.label}</dt>
+      <dd className="font-medium tabular-nums">{props.value}</dd>
     </div>
   );
 }
