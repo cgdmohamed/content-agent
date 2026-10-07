@@ -52,7 +52,6 @@ class ReportsController {
       duplicates: string;
       failed: string;
       average_content_score: string | null;
-      ai_cost: string;
     }>(
       `SELECT
          COUNT(*)::text AS total_content,
@@ -60,8 +59,7 @@ class ReportsController {
          COUNT(*) FILTER (WHERE status NOT IN ('PUBLISHED', 'FAILED', 'DUPLICATE'))::text AS pipeline,
          COUNT(*) FILTER (WHERE status = 'DUPLICATE')::text AS duplicates,
          COUNT(*) FILTER (WHERE status = 'FAILED')::text AS failed,
-         ROUND(AVG(NULLIF(content_score, 0)))::text AS average_content_score,
-         COALESCE((SELECT SUM(estimated_cost_usd)::text FROM api_usage_logs a WHERE a.content_item_id IN (SELECT id FROM content_items WHERE site_id = $1)), '0') AS ai_cost
+         ROUND(AVG(NULLIF(content_score, 0)))::text AS average_content_score
        FROM content_items
        WHERE site_id = $1
          AND EXISTS (SELECT 1 FROM sites s WHERE s.id = $1 AND s.status <> 'DELETED')
@@ -70,6 +68,11 @@ class ReportsController {
       [siteId, range.from, range.toExclusive]
     );
     const row = counts.rows[0]!;
+    // Same attribution and period as the usage report (site_id survives deleting articles; the period applies to the calls themselves).
+    const spend = await this.db.query<{ cost: string }>(
+      "SELECT COALESCE(SUM(estimated_cost_usd), 0)::text AS cost FROM api_usage_logs WHERE site_id = $1 AND created_at >= $2 AND created_at < $3",
+      [siteId, range.from, range.toExclusive]
+    );
     const opportunities = await this.db.query(
       `SELECT query, clicks, impressions, ctr, position, synced_at AS "syncedAt"
        FROM gsc_query_snapshots
@@ -101,7 +104,7 @@ class ReportsController {
       duplicates: Number(row.duplicates),
       failed: Number(row.failed),
       averageContentScore: Number(row.average_content_score ?? 0),
-      aiCost: Number(row.ai_cost),
+      aiCost: Number(spend.rows[0]?.cost ?? 0),
       quality,
       opportunities: opportunities.rows
     };

@@ -41,6 +41,16 @@ test("an admin adds a site and creates content that queues the first job", async
   await expect(page.getByText("التسويق بالمحتوى للشركات الناشئة").first()).toBeVisible();
 });
 
+test("an admin sees per-site usage and activity", async ({ page }) => {
+  await login(page);
+  await page.getByRole("link", { name: "الاستهلاك" }).first().click();
+  await expect(page.getByRole("heading", { name: "الاستهلاك والنشاط لكل موقع" })).toBeVisible();
+  await expect(page.getByText("ميزانية الشهر الحالي")).toBeVisible();
+  await page.getByRole("button", { name: "موقع التجربة" }).click();
+  await expect(page.getByText("ماذا حدث وكم استهلك")).toBeVisible();
+  await expect(page.getByText("محتوى جديد").first()).toBeVisible();
+});
+
 test("a revoked session sends the user back to the login screen", async ({ page }) => {
   await login(page);
   await expect(page.getByRole("link", { name: "مكتبة المحتوى" })).toBeVisible();

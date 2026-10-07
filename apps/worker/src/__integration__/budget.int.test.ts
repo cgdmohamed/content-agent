@@ -42,4 +42,21 @@ describe.skipIf(!integrationEnabled)("AI budget reservations against real Postgr
     expect(rows.find((row) => row.id === settled)).toMatchObject({ success: true, error: null, cost: 0.01 });
     expect(rows.find((row) => row.id === released)).toMatchObject({ success: false, error: "boom", cost: 0 });
   });
+
+  it("keeps the cost of a reservation whose worker died, but labels it as unconfirmed", async () => {
+    const site = await query<{ id: string }>("INSERT INTO sites (name, wordpress_url, wordpress_username, wordpress_application_password_encrypted) VALUES ('s','https://203.0.113.10','u','x') RETURNING id");
+    const item = await query<{ id: string }>("INSERT INTO content_items (site_id, topic) VALUES ($1, 't') RETURNING id", [site.rows[0]!.id]);
+    await query(
+      `INSERT INTO api_usage_logs (provider, model, operation, content_item_id, site_id, estimated_cost_usd, success, error, created_at)
+       VALUES ('openai', 'gpt-4o', 'WRITE_DRAFT', $1, $2, 0.3, false, 'RESERVED', now() - interval '2 hours')`,
+      [item.rows[0]!.id, site.rows[0]!.id]
+    );
+
+    await reserveSpend({ provider: "openai", model: "gpt-4o", operation: "WRITE_DRAFT", contentItemId: item.rows[0]!.id, estimatedCostUsd: 0.1 });
+
+    const rows = (await query("SELECT error, estimated_cost_usd::float AS cost, site_id FROM api_usage_logs ORDER BY created_at")).rows;
+    expect(rows[0]).toMatchObject({ error: "RESERVATION_EXPIRED", cost: 0.3 }); // still counted toward the budget
+    expect(rows[1]).toMatchObject({ error: "RESERVED", cost: 0.1, site_id: site.rows[0]!.id }); // the new, in-flight one
+  });
 });
+

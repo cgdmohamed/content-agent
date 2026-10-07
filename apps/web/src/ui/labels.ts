@@ -33,7 +33,8 @@ export const operationLabels: Record<ContentOperation, string> = {
 
 export const extraOperationLabels: Record<string, string> = {
   OPTIMIZE_LINKS: "تحسين الروابط الداخلية والـ CTA",
-  SYNC_GSC: "مزامنة بحث جوجل"
+  SYNC_GSC: "مزامنة بحث جوجل",
+  LEGACY_IMPORT: "مستورد من النظام القديم"
 };
 
 export const queueLabels: Record<string, string> = {
@@ -123,3 +124,7 @@ export const integrationLabels: Record<IntegrationStatus, string> = {
   BRIDGE_MISSING: "الجسر غير مثبت",
   PERMISSION_ERROR: "خطأ صلاحيات"
 };
+
+export function usageOperationLabel(operation: string): string {
+  return (operationLabels as Record<string, string>)[operation] ?? extraOperationLabels[operation] ?? operation;
+}

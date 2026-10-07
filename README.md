@@ -229,6 +229,16 @@ For a short launch checklist, see `PRODUCTION_CHECKLIST.md`.
 
 Every mutation shows a toast on success (via `meta.successMessage` on the mutation) and on failure (global `MutationCache` handler; the login form opts out with `meta.silent`). React render crashes are caught by an Error Boundary: one per route, so navigation keeps working and moving to another route clears it, plus a page-level fallback. Crashes, `window.onerror` and unhandled promise rejections are posted to `POST /api/client-errors` (authenticated, length-limited, at most 5 per page load) and written to the API log as one JSON line with the user id and request id, so they can be found next to server errors.
 
+### Usage and cost reporting
+
+Admins get an **Usage** screen (`/usage`, also reachable from each site card and its report) answering "what was done on each site and what did it consume?":
+
+- **Overview** for any period (default: the current UTC month): AI spend per site with its share of the total, calls, failed calls, images, content created/published and cost per published article, plus the month-to-date budget bar. A row for spend that cannot be tied to a site (legacy imports) is always shown, so *sum of sites + unattributed = total*, and the total matches the dashboard's monthly spend and the budget window the worker enforces.
+- **Site detail:** total/confirmed/unconfirmed spend, calls (ok/failed), input and output tokens, images, average cost per article and per published article, spend on content that never shipped (deleted/failed/duplicate), jobs completed/failed, activity counters, a daily cost chart, breakdowns by operation and by model, the most expensive articles and the latest audit events for the site.
+- API: `GET /api/reports/usage?from=&to=` and `GET /api/reports/sites/:siteId/usage?from=&to=` (Admin).
+
+Accounting rules (these fixed real discrepancies): every usage row stores `site_id` and a snapshot of the article title when the call is reserved, so deleting an article no longer removes its cost from the site's total; the site report's AI cost now honours the selected period (it used to be all-time next to period-filtered counts); the "month" is always the UTC calendar month in the dashboard, metrics, reports and the worker's budget check; a reservation whose worker died is kept (the provider may have billed it) but relabelled `RESERVATION_EXPIRED` after 30 minutes and shown as *unconfirmed*. Migration `010` backfills `site_id` for existing rows.
+
 ### Backups
 
 The Compose file includes a `backup` service (`docker/backup.Dockerfile`, scripts in `docker/backup/`). It runs a scheduler that, once a day at `BACKUP_HOUR_UTC` (default 02:00 UTC) and at start-up if the last good backup is older than 24 hours:

@@ -12,6 +12,13 @@ export interface SpendReservation {
   estimatedCostUsd: number;
 }
 
+/** Calendar month in UTC, matching the dashboard, reports and metrics (never the database session time zone). */
+export const monthStartSql = "date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'";
+
+// A reservation that was never settled or released (the worker died mid-call) keeps its estimated cost, because the
+// provider may have billed it, but is relabelled so reports can show it as "unconfirmed" instead of an in-flight call.
+const reservationTtlMinutes = 30;
+
 export const budgetExceededMessage = "تم تجاوز حد ميزانية الذكاء الاصطناعي الصارم لهذا الشهر.";
 
 /**
@@ -21,9 +28,12 @@ export const budgetExceededMessage = "تم تجاوز حد ميزانية الذ
 export async function reserveSpend(reservation: SpendReservation): Promise<string> {
   return withTransaction(async (run) => {
     await run("SELECT pg_advisory_xact_lock($1, $2)", [...budgetLockKey]);
-    const spend = await run<{ total: string }>(
-      "SELECT COALESCE(SUM(estimated_cost_usd), 0)::text AS total FROM api_usage_logs WHERE created_at >= date_trunc('month', now())"
+    await run(
+      `UPDATE api_usage_logs SET error = 'RESERVATION_EXPIRED'
+       WHERE success = false AND error = 'RESERVED' AND created_at < now() - make_interval(mins => $1)`,
+      [reservationTtlMinutes]
     );
+    const spend = await run<{ total: string }>(`SELECT COALESCE(SUM(estimated_cost_usd), 0)::text AS total FROM api_usage_logs WHERE created_at >= ${monthStartSql}`);
     const settings = await run<{ value: { monthlyAiBudgetUsd?: number; monthlyAiHardLimitUsd?: number } }>(
       "SELECT value FROM system_settings WHERE key = 'production_settings'"
     );
@@ -33,11 +43,13 @@ export async function reserveSpend(reservation: SpendReservation): Promise<strin
       value.monthlyAiHardLimitUsd ?? Number(process.env.MONTHLY_AI_HARD_LIMIT_USD ?? 40)
     );
     if (isBudgetExceeded(Number(spend.rows[0]?.total ?? 0), hardLimit)) throw new Error(budgetExceededMessage);
+    // Attribute the spend to the site now, so it survives later deletion of the article.
+    const owner = await run<{ site_id: string; label: string }>("SELECT site_id, COALESCE(title, topic) AS label FROM content_items WHERE id = $1", [reservation.contentItemId]);
     const inserted = await run<{ id: string }>(
-      `INSERT INTO api_usage_logs (provider, model, operation, content_item_id, estimated_cost_usd, success, error)
-       VALUES ($1, $2, $3, $4, $5, false, 'RESERVED')
+      `INSERT INTO api_usage_logs (provider, model, operation, content_item_id, site_id, content_label, estimated_cost_usd, success, error)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, false, 'RESERVED')
        RETURNING id`,
-      [reservation.provider, reservation.model, reservation.operation, reservation.contentItemId, reservation.estimatedCostUsd]
+      [reservation.provider, reservation.model, reservation.operation, reservation.contentItemId, owner.rows[0]?.site_id ?? null, owner.rows[0]?.label ?? null, reservation.estimatedCostUsd]
     );
     return inserted.rows[0]!.id;
   });
@@ -49,7 +61,8 @@ export async function settleSpend(
 ): Promise<void> {
   await query(
     `UPDATE api_usage_logs
-     SET input_tokens = $2, output_tokens = $3, estimated_cost_usd = $4, duration_ms = $5, success = true, error = NULL
+     SET input_tokens = $2, output_tokens = $3, estimated_cost_usd = $4, duration_ms = $5, success = true, error = NULL,
+         content_label = COALESCE((SELECT COALESCE(c.title, c.topic) FROM content_items c WHERE c.id = api_usage_logs.content_item_id), content_label)
      WHERE id = $1`,
     [id, result.inputTokens, result.outputTokens, result.costUsd, result.durationMs]
   );

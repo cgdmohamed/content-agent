@@ -53,7 +53,7 @@ class MetricsService {
       this.db.query<{ queue_name: string; status: string; count: string }>("SELECT queue_name, status, COUNT(*)::text AS count FROM job_runs GROUP BY queue_name, status"),
       this.db.query<{ count: string }>("SELECT COUNT(*)::text AS count FROM job_runs WHERE status = 'FAILED' AND finished_at >= now() - interval '1 hour'"),
       this.db.query<{ seconds: string | null }>("SELECT EXTRACT(EPOCH FROM now() - MIN(created_at))::text AS seconds FROM job_runs WHERE status IN ('WAITING', 'DELAYED')"),
-      this.db.query<{ total: string }>("SELECT COALESCE(SUM(estimated_cost_usd), 0)::text AS total FROM api_usage_logs WHERE created_at >= date_trunc('month', now())"),
+      this.db.query<{ total: string }>("SELECT COALESCE(SUM(estimated_cost_usd), 0)::text AS total FROM api_usage_logs WHERE created_at >= date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'"),
       this.queue.redis.get(workerHeartbeatKey).catch(() => null)
     ]);
     const { http, startedAt } = observability();

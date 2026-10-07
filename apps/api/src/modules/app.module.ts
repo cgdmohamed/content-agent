@@ -14,10 +14,11 @@ import { JobsModule } from "./jobs.module.js";
 import { ReportsModule } from "./reports.module.js";
 import { SettingsModule } from "./settings.module.js";
 import { SitesModule } from "./sites.module.js";
+import { UsageReportModule } from "./usage-report.module.js";
 import { UsersModule } from "./users.module.js";
 
 @Module({
-  imports: [DatabaseModule, AuditModule, JobQueueModule, AuthModule, SitesModule, ContentModule, DashboardModule, JobsModule, ReportsModule, SettingsModule, UsersModule, HealthModule, ClientErrorsModule, MetricsModule],
+  imports: [DatabaseModule, AuditModule, JobQueueModule, AuthModule, SitesModule, ContentModule, DashboardModule, JobsModule, ReportsModule, SettingsModule, UsersModule, HealthModule, ClientErrorsModule, MetricsModule, UsageReportModule],
   providers: [{ provide: APP_GUARD, useClass: SessionGuard }]
 })
 export class AppModule {}

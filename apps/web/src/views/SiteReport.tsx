@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ContentState } from "@content-agent/shared";
 import { Download, ExternalLink, FileText, Printer, RefreshCcw, Sparkles } from "lucide-react";
@@ -45,7 +45,8 @@ export function SiteReport(): ReactElement {
             <h2 className="text-lg font-semibold">تقرير الموقع</h2>
             <p className="text-sm text-slate-500">من {report.data.from} إلى {report.data.to}</p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-end gap-2">
+            <Link className="inline-flex min-h-9 items-center rounded-md border border-slate-200 px-3 py-2 text-sm font-semibold hover:border-teal/40 hover:bg-slate-50" to={`/usage?site=${id}&from=${from}&to=${to}`}>تفاصيل الاستهلاك والنشاط</Link>
             <DateInput label="من" value={from} onChange={setFrom} />
             <DateInput label="إلى" value={to} onChange={setTo} />
           </div>

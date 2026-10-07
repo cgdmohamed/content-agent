@@ -312,10 +312,12 @@ async function migrateUsage(client, columns) {
     const contentItemId = row.item_id ? await lookup(client, "content_items", String(row.item_id)) : null;
     const { rows: inserted } = await client.query(
       `INSERT INTO api_usage_logs (
-         provider, model, operation, content_item_id, input_tokens, output_tokens,
+         provider, model, operation, content_item_id, site_id, content_label, input_tokens, output_tokens,
          estimated_cost_usd, duration_ms, success, created_at
        )
-       VALUES ($1, $2, 'LEGACY_IMPORT', $3, $4, $5, $6, 0, true, COALESCE($7, now()))
+       SELECT $1, $2, 'LEGACY_IMPORT', $3::uuid, c.site_id, COALESCE(c.title, c.topic), $4, $5, $6, 0, true, COALESCE($7, now())
+       FROM (SELECT 1) AS one
+       LEFT JOIN content_items c ON c.id = $3::uuid
        RETURNING id`,
       [
         cleanText(row.provider) || "legacy",

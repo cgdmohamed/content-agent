@@ -234,6 +234,72 @@ export interface DashboardDto {
   }>;
 }
 
+export interface UsageSiteRowDto {
+  siteId: string;
+  name: string;
+  status: string;
+  costUsd: number;
+  unconfirmedCostUsd: number;
+  calls: number;
+  failedCalls: number;
+  images: number;
+  inputTokens: number;
+  outputTokens: number;
+  contentCreated: number;
+  contentPublished: number;
+  costPerPublishedUsd: number | null;
+  shareOfTotal: number;
+}
+
+export interface UsageOverviewDto {
+  from: string;
+  to: string;
+  totalCostUsd: number;
+  totalCalls: number;
+  unattributedCostUsd: number;
+  unattributedCalls: number;
+  month: { costUsd: number; budgetUsd: number; hardLimitUsd: number };
+  sites: UsageSiteRowDto[];
+}
+
+export interface SiteUsageDto {
+  siteId: string;
+  siteName: string;
+  siteStatus: string;
+  from: string;
+  to: string;
+  totals: {
+    costUsd: number;
+    confirmedCostUsd: number;
+    unconfirmedCostUsd: number;
+    abandonedCostUsd: number;
+    calls: number;
+    successfulCalls: number;
+    failedCalls: number;
+    inputTokens: number;
+    outputTokens: number;
+    images: number;
+    articlesWithUsage: number;
+    costPerArticleUsd: number | null;
+    costPerPublishedUsd: number | null;
+  };
+  activity: {
+    contentCreated: number;
+    contentPublished: number;
+    scheduledNow: number;
+    pipelineNow: number;
+    failedNow: number;
+    jobsCompleted: number;
+    jobsFailed: number;
+    jobsCancelled: number;
+  };
+  byOperation: Array<{ operation: string; calls: number; successfulCalls: number; failedCalls: number; costUsd: number; inputTokens: number; outputTokens: number }>;
+  byModel: Array<{ provider: string; model: string; calls: number; costUsd: number; inputTokens: number; outputTokens: number }>;
+  byDay: Array<{ date: string; costUsd: number; calls: number }>;
+  topContent: Array<{ contentItemId: string | null; label: string; status: string | null; deleted: boolean; costUsd: number; calls: number }>;
+  recentActivity: Array<{ id: string; eventType: string; message: string; createdAt: string; contentItemId: string | null; actor: string | null }>;
+}
+
 export interface SettingsDto {
   monthlyAiBudgetUsd: number;
   monthlyAiHardLimitUsd: number;
@@ -505,9 +571,18 @@ export const api = {
     if (params?.to) search.set("to", params.to);
     return request<SiteReportDto>(`/reports/sites/${siteId}${search.size ? `?${search.toString()}` : ""}`);
   },
+  usageOverview: (params?: { from?: string; to?: string }) => request<UsageOverviewDto>(`/reports/usage${rangeQuery(params)}`),
+  siteUsage: (siteId: string, params?: { from?: string; to?: string }) => request<SiteUsageDto>(`/reports/sites/${siteId}/usage${rangeQuery(params)}`),
   siteAudit: (siteId: string) => request<SiteAuditDto>(`/reports/sites/${siteId}/audit`),
   audit: () => request<AuditEventDto[]>("/audit")
 };
+
+function rangeQuery(params?: { from?: string; to?: string }): string {
+  const search = new URLSearchParams();
+  if (params?.from) search.set("from", params.from);
+  if (params?.to) search.set("to", params.to);
+  return search.size ? `?${search.toString()}` : "";
+}
 
 function queryString(params?: ContentListParams): string {
   if (!params) return "";

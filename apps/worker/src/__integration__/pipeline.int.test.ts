@@ -80,6 +80,13 @@ describe.skipIf(!integrationEnabled)("worker pipeline against real PostgreSQL", 
     // 1000 input + 2000 output tokens as reported by the provider: (1000*3 + 2000*15) / 1e6
     expect(writing.cost).toBeCloseTo(0.033, 6);
     expect(writing.input_tokens).toBe(1000);
+    // Every call is attributed to the site and names its article, so the spend survives deleting the article later.
+    const attribution = await query("SELECT count(*)::int AS total, count(site_id)::int AS with_site, count(content_label)::int AS with_label FROM api_usage_logs");
+    expect(attribution.rows[0]).toEqual({ total: usage.length, with_site: usage.length, with_label: usage.length });
+    await query("DELETE FROM content_items WHERE id = $1", [contentId]);
+    const afterDelete = await query("SELECT count(*)::int AS count, SUM(estimated_cost_usd)::float AS cost FROM api_usage_logs WHERE site_id = $1", [siteId]);
+    expect(afterDelete.rows[0]!.count).toBe(usage.length);
+    expect(afterDelete.rows[0]!.cost).toBeCloseTo(usage.reduce((total, row) => total + (row.cost as number), 0), 6);
     const image = usage.find((row) => row.operation === "GENERATE_IMAGE")!;
     expect(image.provider).toBe("gemini-image");
     expect(image.cost).toBeGreaterThan(0);

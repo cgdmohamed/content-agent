@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { readFileSync } from "node:fs";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Queue } from "bullmq";
@@ -212,4 +213,99 @@ describe.skipIf(!enabled)("API over HTTP with real PostgreSQL and Redis", () => 
     expect((await api("/client-errors", { method: "POST", cookie: adminCookie, body: { message: "boom", stack: "at x", url: "/content" } })).status).toBe(204);
     expect((await api("/client-errors", { method: "POST", body: { message: "boom" } })).status).toBe(401);
   });
+
+  it("reports per-site activity and spend, keeps spend of deleted articles, and reconciles with the global total", async () => {
+    const createSite = async (name: string) =>
+      String((await api("/sites", { method: "POST", cookie: adminCookie, body: { name, wordpressUrl: "https://203.0.113.11", wordpressUsername: "u", wordpressApplicationPassword: "p", market: "SA", language: "ar" } })).body.id);
+    const siteA = await createSite("موقع أ");
+    const siteB = await createSite("موقع ب");
+    const createContent = async (siteId: string, topic: string) => String((await api("/content", { method: "POST", cookie: adminCookie, body: { siteId, topic } })).body.id);
+    const keep = await createContent(siteA, "مقال يبقى");
+    const doomed = await createContent(siteA, "مقال سيُحذف");
+    const other = await createContent(siteB, "مقال الموقع ب");
+
+    const db = new Client({ connectionString: process.env.DATABASE_URL });
+    await db.connect();
+    try {
+      const usage = (site: string | null, content: string | null, label: string | null, operation: string, cost: number, success = true, error: string | null = null, ageDays = 0) =>
+        db.query(
+          `INSERT INTO api_usage_logs (provider, model, operation, content_item_id, site_id, content_label, input_tokens, output_tokens, estimated_cost_usd, success, error, created_at)
+           VALUES ('anthropic', 'claude-3-5-sonnet-latest', $1, $2, $3, $4, 1000, 2000, $5, $6, $7, now() - make_interval(days => $8))`,
+          [operation, content, site, label, cost, success, error, ageDays]
+        );
+      await usage(siteA, keep, "مقال يبقى", "GENERATE_IDEAS", 0.01);
+      await usage(siteA, keep, "مقال يبقى", "WRITE_DRAFT", 0.05);
+      await usage(siteA, doomed, "مقال سيُحذف", "WRITE_DRAFT", 0.07);
+      await usage(siteA, keep, "مقال يبقى", "GENERATE_IMAGE", 0.1);
+      await usage(siteA, keep, "مقال يبقى", "WRITE_DRAFT", 0.02, false, "RESERVED"); // in flight: counts toward the budget, shown as unconfirmed
+      await usage(siteA, keep, "مقال يبقى", "REVIEW_DRAFT", 0, false, "provider timeout"); // failed call: billed nothing
+      await usage(siteB, other, "مقال الموقع ب", "WRITE_DRAFT", 0.4);
+      await usage(null, null, null, "LEGACY_IMPORT", 0.25); // cannot be tied to a site
+      await usage(siteA, keep, "مقال يبقى", "WRITE_DRAFT", 9, true, null, 400); // outside the default period
+    } finally {
+      await db.end();
+    }
+
+    // Deleting the article used to make its spend disappear from the site total (content_item_id -> NULL).
+    expect((await api(`/content/${doomed}`, { method: "DELETE", cookie: adminCookie })).status).toBeLessThan(300);
+
+    const report = await api(`/reports/sites/${siteA}/usage`, { cookie: adminCookie });
+    expect(report.status).toBe(200);
+    expect(report.body.totals).toMatchObject({
+      costUsd: 0.25, // 0.01 + 0.05 + 0.07 (deleted article) + 0.1 + 0.02 in flight; the 400-day-old row is outside the period
+      confirmedCostUsd: 0.23,
+      unconfirmedCostUsd: 0.02,
+      abandonedCostUsd: 0.07,
+      calls: 6,
+      failedCalls: 1,
+      images: 1,
+      articlesWithUsage: 1
+    });
+    const operations = Object.fromEntries((report.body.byOperation as Array<{ operation: string; costUsd: number; calls: number }>).map((row) => [row.operation, row]));
+    expect(operations.WRITE_DRAFT).toMatchObject({ calls: 3, costUsd: 0.14 });
+    expect(operations.GENERATE_IMAGE?.costUsd).toBe(0.1);
+    const top = report.body.topContent as Array<{ label: string; deleted: boolean; costUsd: number }>;
+    expect(top.find((row) => row.deleted)).toMatchObject({ label: "مقال سيُحذف", costUsd: 0.07 });
+    expect(report.body.activity).toMatchObject({ contentCreated: 1 });
+    expect((report.body.recentActivity as unknown[]).length).toBeGreaterThan(0);
+
+    // A wider period includes the old row, and the old report's aiCost now follows the same period and attribution.
+    const wide = await api(`/reports/sites/${siteA}/usage?from=2020-01-01`, { cookie: adminCookie });
+    expect((wide.body.totals as { costUsd: number }).costUsd).toBe(9.25);
+    const legacyReport = await api(`/reports/sites/${siteA}?from=2020-01-01`, { cookie: adminCookie });
+    expect(legacyReport.body.aiCost).toBe(9.25);
+    expect((await api(`/reports/sites/${siteA}`, { cookie: adminCookie })).body.aiCost).toBe(0.25);
+
+    // Per-site rows + unattributed spend always add up to the global total, which matches the dashboard and the budget window.
+    const overview = await api("/reports/usage", { cookie: adminCookie });
+    const sites = overview.body.sites as Array<{ siteId: string; costUsd: number; shareOfTotal: number }>;
+    const sum = sites.reduce((total, row) => total + row.costUsd, 0) + (overview.body.unattributedCostUsd as number);
+    expect(Number(sum.toFixed(6))).toBe(overview.body.totalCostUsd);
+    expect(overview.body.totalCostUsd).toBe(0.9); // 0.25 + 0.4 + 0.25 legacy
+    expect(overview.body.unattributedCostUsd).toBe(0.25);
+    expect(sites.find((row) => row.siteId === siteB)?.costUsd).toBe(0.4);
+    expect(sites[0]!.siteId).toBe(siteB); // sorted by spend
+    expect((overview.body.month as { costUsd: number }).costUsd).toBe(overview.body.totalCostUsd);
+    expect((await api("/dashboard", { cookie: adminCookie })).body.monthlyAiSpend).toBe(overview.body.totalCostUsd);
+
+    expect((await api("/reports/sites/not-a-uuid/usage", { cookie: adminCookie })).status).toBe(400);
+    expect((await api("/reports/sites/00000000-0000-4000-8000-000000000000/usage", { cookie: adminCookie })).status).toBe(404);
+  });
+
+  it("backfills site attribution for usage rows written before migration 010", async () => {
+    const db = new Client({ connectionString: process.env.DATABASE_URL });
+    await db.connect();
+    try {
+      const item = await db.query<{ id: string; site_id: string }>("SELECT id, site_id FROM content_items LIMIT 1");
+      await db.query("INSERT INTO api_usage_logs (provider, model, operation, content_item_id, estimated_cost_usd) VALUES ('openai', 'gpt-4o', 'WRITE_DRAFT', $1, 0.01)", [item.rows[0]!.id]);
+      const migration = readFileSync(new URL("../database/migrations/010_usage_attribution.sql", import.meta.url), "utf8");
+      await db.query(migration); // idempotent: safe to re-run
+      const row = await db.query("SELECT site_id, content_label FROM api_usage_logs WHERE provider = 'openai' AND estimated_cost_usd = 0.01");
+      expect(row.rows[0]).toMatchObject({ site_id: item.rows[0]!.site_id });
+      expect(row.rows[0]!.content_label).toBeTruthy();
+    } finally {
+      await db.end();
+    }
+  });
 });
+

@@ -51,6 +51,7 @@ const Operations = lazy(() => import("./views/Operations").then((module) => ({ d
 const Users = lazy(() => import("./views/Users").then((module) => ({ default: module.Users })));
 const Settings = lazy(() => import("./views/Settings").then((module) => ({ default: module.Settings })));
 const SiteReport = lazy(() => import("./views/SiteReport").then((module) => ({ default: module.SiteReport })));
+const Usage = lazy(() => import("./views/Usage").then((module) => ({ default: module.Usage })));
 const SiteAudit = lazy(() => import("./views/SiteAudit").then((module) => ({ default: module.SiteAudit })));
 
 createRoot(document.getElementById("root")!).render(
@@ -67,6 +68,7 @@ createRoot(document.getElementById("root")!).render(
             <Route path="sites" element={<RouteView><Sites /></RouteView>} />
             <Route path="site-audit" element={<RouteView><SiteAudit /></RouteView>} />
             <Route path="sites/:id/report" element={<RouteView><SiteReport /></RouteView>} />
+            <Route path="usage" element={<RouteView><Usage /></RouteView>} />
             <Route path="operations" element={<RouteView><Operations /></RouteView>} />
             <Route path="users" element={<RouteView><Users /></RouteView>} />
             <Route path="settings" element={<RouteView><Settings /></RouteView>} />

@@ -1,4 +1,4 @@
-import { AlertTriangle, BarChart3, Edit3, FilePlus2, Globe2, Power, RefreshCw, SearchCheck, Settings2, SquarePen, Trash2, Wifi } from "lucide-react";
+import { AlertTriangle, BarChart3, CircleDollarSign, Edit3, FilePlus2, Globe2, Power, RefreshCw, SearchCheck, Settings2, SquarePen, Trash2, Wifi } from "lucide-react";
 import { useState, type FormEvent, type ReactElement } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -229,6 +229,7 @@ export function Sites(): ReactElement {
               ) : null}
               <Link className="inline-flex min-h-9 items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm font-semibold hover:border-teal/40 hover:bg-slate-50" to="/content"><Edit3 className="h-4 w-4" />إنشاء محتوى</Link>
               {isAdmin ? <Link className="inline-flex min-h-9 items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm font-semibold hover:border-teal/40 hover:bg-slate-50" to={`/sites/${site.id}/report`}><BarChart3 className="h-4 w-4" />عرض التقرير</Link> : null}
+              {isAdmin ? <Link className="inline-flex min-h-9 items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm font-semibold hover:border-teal/40 hover:bg-slate-50" to={`/usage?site=${site.id}`}><CircleDollarSign className="h-4 w-4" />الاستهلاك والنشاط</Link> : null}
             </div>
             {isAdmin ? <div className="mt-3 space-y-2">
               <ActionError error={testWp.variables === site.id ? testWp.error : null} />
