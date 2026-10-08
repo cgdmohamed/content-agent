@@ -6,13 +6,17 @@ import type { ContentState } from "@content-agent/shared";
 import { Download, ExternalLink, FileText, Printer, RefreshCcw, Sparkles } from "lucide-react";
 import { api, type SiteAuditDto, type SiteAuditIssueDto } from "../api/client";
 import { StatusBadge } from "../ui/Badge";
+import { Tabs } from "../ui/Tabs";
 import { ActionError, EmptyState, ErrorState, LoadingState } from "../ui/StateViews";
+
+type AuditTypeTab = "all" | "post" | "page";
 
 export function SiteReport(): ReactElement {
   const { id = "" } = useParams();
   const queryClient = useQueryClient();
   const [from, setFrom] = useState(defaultFrom());
   const [to, setTo] = useState(today());
+  const [typeTab, setTypeTab] = useState<AuditTypeTab>("all");
   const [doneItems, setDoneItems] = useState<Record<string, boolean>>({});
   const report = useQuery({ queryKey: ["site-report", id, from, to], queryFn: () => api.siteReport(id, { from, to }), enabled: Boolean(id) });
   const audit = useQuery({ queryKey: ["site-audit", id], queryFn: () => api.siteAudit(id), enabled: Boolean(id), staleTime: 60_000 });
@@ -85,9 +89,21 @@ export function SiteReport(): ReactElement {
           <div className="mt-5 space-y-5">
             <AuditSummary audit={audit.data} />
             <AuditChecklist audit={audit.data} doneItems={doneItems} onToggle={(key) => setDoneItems((current) => ({ ...current, [key]: !current[key] }))} />
-            <AuditIssues issues={audit.data.issues} onOptimize={(contentItemId) => optimize.mutate(contentItemId)} pendingId={optimize.variables} isPending={optimize.isPending} />
-            <ActionError error={optimize.error} />
-            <AuditPages audit={audit.data} />
+            <div className="space-y-4">
+              <Tabs
+                label="نوع المحتوى"
+                value={typeTab}
+                onChange={setTypeTab}
+                items={[
+                  { id: "all", label: "الكل", count: audit.data.pages.length },
+                  { id: "post", label: "المقالات", count: audit.data.pages.filter((page) => page.type === "post").length },
+                  { id: "page", label: "الصفحات", count: audit.data.pages.filter((page) => page.type === "page").length }
+                ]}
+              />
+              <AuditIssues issues={audit.data.issues.filter((issue) => typeTab === "all" || issue.type === typeTab)} onOptimize={(contentItemId) => optimize.mutate(contentItemId)} pendingId={optimize.variables} isPending={optimize.isPending} />
+              <ActionError error={optimize.error} />
+              <AuditPages audit={audit.data} pages={audit.data.pages.filter((page) => typeTab === "all" || page.type === typeTab)} />
+            </div>
           </div>
         ) : null}
       </section>
@@ -269,7 +285,8 @@ function AuditIssues(props: { issues: SiteAuditIssueDto[]; onOptimize: (contentI
   );
 }
 
-function AuditPages(props: { audit: SiteAuditDto }): ReactElement {
+function AuditPages(props: { audit: SiteAuditDto; pages: SiteAuditDto["pages"] }): ReactElement {
+  if (props.pages.length === 0) return <EmptyState label="لا توجد عناصر من هذا النوع." />;
   return (
     <div className="overflow-x-auto rounded-md border border-slate-200">
       <table className="w-full min-w-[980px] text-right text-sm">
@@ -287,7 +304,7 @@ function AuditPages(props: { audit: SiteAuditDto }): ReactElement {
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
-          {props.audit.pages.map((page) => (
+          {props.pages.map((page) => (
             <tr key={`${page.type}-${page.id}`}>
               <td className="max-w-sm px-4 py-3">
                 <a className="font-semibold text-teal hover:underline" href={page.url} target="_blank" rel="noreferrer">{page.title}</a>
