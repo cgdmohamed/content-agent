@@ -1,11 +1,12 @@
 import { MutationCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import React, { Suspense, lazy } from "react";
+import React, { Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { errorMessage, sessionExpiredMessage } from "./api/client";
 import { installGlobalErrorReporting } from "./report-client-error";
 import { AppShell } from "./ui/AppShell";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
+import { lazyView } from "./lazy-view";
 import { toast } from "./ui/toast";
 import { ToastViewport } from "./ui/ToastViewport";
 import { LoadingState } from "./ui/StateViews";
@@ -43,17 +44,17 @@ const queryClient = new QueryClient({
     }
   })
 });
-const Dashboard = lazy(() => import("./views/Dashboard").then((module) => ({ default: module.Dashboard })));
-const ContentLibrary = lazy(() => import("./views/ContentLibrary").then((module) => ({ default: module.ContentLibrary })));
-const ArticleWorkspace = lazy(() => import("./views/ArticleWorkspace").then((module) => ({ default: module.ArticleWorkspace })));
-const Sites = lazy(() => import("./views/Sites").then((module) => ({ default: module.Sites })));
-const Operations = lazy(() => import("./views/Operations").then((module) => ({ default: module.Operations })));
-const Users = lazy(() => import("./views/Users").then((module) => ({ default: module.Users })));
-const Settings = lazy(() => import("./views/Settings").then((module) => ({ default: module.Settings })));
-const SitePages = lazy(() => import("./views/SitePages").then((module) => ({ default: module.SitePages })));
-const SiteReport = lazy(() => import("./views/SiteReport").then((module) => ({ default: module.SiteReport })));
-const Usage = lazy(() => import("./views/Usage").then((module) => ({ default: module.Usage })));
-const SiteAudit = lazy(() => import("./views/SiteAudit").then((module) => ({ default: module.SiteAudit })));
+const Dashboard = lazyView(() => import("./views/Dashboard").then((module) => ({ default: module.Dashboard })));
+const ContentLibrary = lazyView(() => import("./views/ContentLibrary").then((module) => ({ default: module.ContentLibrary })));
+const ArticleWorkspace = lazyView(() => import("./views/ArticleWorkspace").then((module) => ({ default: module.ArticleWorkspace })));
+const Sites = lazyView(() => import("./views/Sites").then((module) => ({ default: module.Sites })));
+const Operations = lazyView(() => import("./views/Operations").then((module) => ({ default: module.Operations })));
+const Users = lazyView(() => import("./views/Users").then((module) => ({ default: module.Users })));
+const Settings = lazyView(() => import("./views/Settings").then((module) => ({ default: module.Settings })));
+const SitePages = lazyView(() => import("./views/SitePages").then((module) => ({ default: module.SitePages })));
+const SiteReport = lazyView(() => import("./views/SiteReport").then((module) => ({ default: module.SiteReport })));
+const Usage = lazyView(() => import("./views/Usage").then((module) => ({ default: module.Usage })));
+const SiteAudit = lazyView(() => import("./views/SiteAudit").then((module) => ({ default: module.SiteAudit })));
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

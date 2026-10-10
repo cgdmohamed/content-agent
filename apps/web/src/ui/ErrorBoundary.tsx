@@ -1,6 +1,7 @@
 import { AlertTriangle, Home, RotateCcw } from "lucide-react";
 import { Component, type ErrorInfo, type ReactElement, type ReactNode } from "react";
 import { reportClientError } from "../report-client-error";
+import { isChunkLoadError } from "../lazy-view";
 
 interface Props {
   children: ReactNode;
@@ -33,8 +34,25 @@ export class ErrorBoundary extends Component<Props, State> {
 
   render(): ReactNode {
     if (!this.state.error) return this.props.children;
+    if (isChunkLoadError(this.state.error)) return <NewVersionNotice scope={this.props.scope ?? "section"} />;
     return <ErrorFallback scope={this.props.scope ?? "section"} onRetry={() => this.setState({ error: null })} />;
   }
+}
+
+/** The app was updated while this tab was open: a reload loads the new version, nothing is wrong with the data. */
+function NewVersionNotice(props: { scope: "page" | "section" }): ReactElement {
+  const panel = (
+    <div role="alert" className="mx-auto max-w-lg rounded-lg border border-teal/30 bg-white p-6 text-right">
+      <h2 className="text-lg font-semibold text-slate-900">تم تحديث التطبيق</h2>
+      <p className="mt-2 text-sm leading-6 text-slate-600">صدرت نسخة جديدة أثناء فتح هذه الصفحة. حدّث الصفحة لتحميلها. تعديلاتك غير المحفوظة في المقالات محفوظة محليًا وستُعرض عليك للاسترجاع.</p>
+      <div className="mt-5 flex justify-end">
+        <button type="button" className="inline-flex items-center gap-2 rounded-md bg-teal px-4 py-2 text-sm font-semibold text-white" onClick={() => window.location.reload()}>
+          <RotateCcw className="h-4 w-4" />تحديث الصفحة
+        </button>
+      </div>
+    </div>
+  );
+  return props.scope === "page" ? <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4">{panel}</div> : <div className="py-10">{panel}</div>;
 }
 
 function ErrorFallback(props: { scope: "page" | "section"; onRetry: () => void }): ReactElement {
