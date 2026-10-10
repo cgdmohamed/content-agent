@@ -6,6 +6,7 @@ import { captureException, flushMonitoring, initMonitoring } from "@content-agen
 import { closeDb, markJobCompleted, markJobFailed, markJobProvider, markJobRetrying, markJobStarted, query, setContentFailure } from "./db.js";
 import { processContentOperation, providerForOperationResult, syncGscForSite } from "./processors.js";
 import { sitesNeedingPageSync, syncPagesForSite } from "./pages-sync.js";
+import { classifySitePages } from "./page-classifier.js";
 import { hasRetriesLeft } from "./retry.js";
 import { nextAutomatedOperation, shouldAutoContinue, type AutomationState } from "./automation.js";
 
@@ -153,6 +154,10 @@ for (const queueName of queueNames) {
           if (!siteId) throw new Error("لا يوجد siteId في مهمة GSC.");
           await syncGscForSite(siteId);
           await markJobProvider(bullJobId, "google-search-console");
+        } else if (operation === "CLASSIFY_PAGES") {
+          if (!siteId) throw new Error("لا يوجد siteId في مهمة تصنيف الصفحات.");
+          const done = await classifySitePages(siteId, { onlyNew: job.data?.onlyNew === true });
+          jobLog.info("site pages classified", { ...done });
         } else if (operation === "SYNC_PAGES") {
           if (!siteId) throw new Error("لا يوجد siteId في مهمة مزامنة الصفحات.");
           const synced = await syncPagesForSite(siteId);

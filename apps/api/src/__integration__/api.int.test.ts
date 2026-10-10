@@ -395,6 +395,15 @@ describe.skipIf(!enabled)("API over HTTP with real PostgreSQL and Redis", () => 
       expect(job?.data).toMatchObject({ siteId });
       await queue.close();
       expect((await api(`/sites/${siteId}/sync-pages`, { method: "POST", cookie: adminCookie })).body.jobId).toBe(queued.body.jobId); // not queued twice
+
+      const classify = await api(`/sites/${siteId}/classify-pages`, { method: "POST", cookie: adminCookie, body: { onlyNew: true } });
+      expect(classify.status).toBe(201);
+      const maintenance = new Queue("maintenance", { connection: redis });
+      const classifyJob = await maintenance.getJob(String(classify.body.jobId));
+      await maintenance.close();
+      expect(classifyJob?.name).toBe("CLASSIFY_PAGES");
+      expect(classifyJob?.data).toMatchObject({ siteId, onlyNew: true });
+      expect((await api(`/sites/${siteId}/classify-pages`, { method: "POST", cookie: adminCookie, body: { onlyNew: "yes" } })).status).toBe(400);
     } finally {
       await db.end();
     }

@@ -59,6 +59,12 @@ class CreateSiteDto {
   status?: "ACTIVE" | "DISABLED";
 }
 
+class ClassifyPagesDto {
+  @IsOptional()
+  @IsBoolean()
+  onlyNew?: boolean;
+}
+
 class UpdateSitePageDto {
   @IsOptional()
   @IsIn(["SERVICE", "PRODUCT", "ARTICLE", "ABOUT", "CONTACT", "OTHER"])
@@ -386,7 +392,7 @@ class SitesService {
         kind: row.kind,
         priority: row.priority,
         hidden: row.hidden,
-        manual: row.kind_source === "MANUAL",
+        source: row.kind_source,
         language: row.language,
         summary: row.summary,
         syncedAt: row.synced_at
@@ -405,6 +411,25 @@ class SitesService {
     if (!result.rowCount) throw new NotFoundException("الصفحة غير موجودة");
     await this.audit.record({ actorUserId, siteId: id, eventType: "SITE_PAGE_UPDATED", message: "تم تعديل صفحة في فهرس الموقع", metadata: { pageId, ...body } });
     return { ok: true };
+  }
+
+  /** Queues the model-based classification of the site's pages (`onlyNew` leaves pages the model already judged). */
+  async classifyPages(id: string, onlyNew: boolean, actorUserId?: string): Promise<{ statusCode: 202; jobId: string; siteId: string }> {
+    const site = await this.db.query<{ site_status: string }>("SELECT status AS site_status FROM sites WHERE id = $1 AND status <> 'DELETED'", [id]);
+    if (!site.rowCount) throw new NotFoundException("الموقع غير موجود");
+    assertSiteActive(site.rows[0]!.site_status);
+    const inFlight = await this.db.query<{ bull_job_id: string }>(
+      `SELECT bull_job_id FROM job_runs
+       WHERE operation = 'CLASSIFY_PAGES' AND bull_job_id LIKE $1 AND status IN ('WAITING', 'ACTIVE', 'DELAYED') AND bull_job_id IS NOT NULL
+       ORDER BY created_at DESC LIMIT 1`,
+      [`CLASSIFY_PAGES-${id}-%`]
+    );
+    if (inFlight.rowCount) return { statusCode: 202, jobId: inFlight.rows[0]!.bull_job_id, siteId: id };
+    const jobId = buildJobId("CLASSIFY_PAGES", id);
+    await this.queue.enqueue("maintenance", "CLASSIFY_PAGES", { siteId: id, operation: "CLASSIFY_PAGES", onlyNew }, jobId);
+    await this.db.query("INSERT INTO job_runs (operation, queue_name, bull_job_id, status) VALUES ('CLASSIFY_PAGES', 'maintenance', $1, 'WAITING') ON CONFLICT DO NOTHING", [jobId]);
+    await this.audit.record({ actorUserId, siteId: id, eventType: "SITE_PAGES_CLASSIFY_ENQUEUED", message: "تمت إضافة تصنيف صفحات الموقع بالموديل إلى الطابور", metadata: { jobId, onlyNew } });
+    return { statusCode: 202, jobId, siteId: id };
   }
 
   async syncPages(id: string, actorUserId?: string): Promise<{ statusCode: 202; jobId: string; siteId: string }> {
@@ -577,6 +602,12 @@ class SitesController {
   @Roles("ADMIN")
   updatePage(@Param("id") id: string, @Param("pageId") pageId: string, @Body() body: UpdateSitePageDto, @Req() request: AuthenticatedRequest): Promise<{ ok: true }> {
     return this.sites.updatePage(id, pageId, body, request.user?.id);
+  }
+
+  @Post(":id/classify-pages")
+  @Roles("ADMIN")
+  classifyPages(@Param("id") id: string, @Body() body: ClassifyPagesDto, @Req() request: AuthenticatedRequest): Promise<{ statusCode: 202; jobId: string; siteId: string }> {
+    return this.sites.classifyPages(id, body.onlyNew === true, request.user?.id);
   }
 
   @Post(":id/sync-pages")

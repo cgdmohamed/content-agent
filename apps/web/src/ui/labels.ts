@@ -36,6 +36,7 @@ export const extraOperationLabels: Record<string, string> = {
   TRANSLATE_CONTENT: "ترجمة المقال",
   SYNC_GSC: "مزامنة بحث جوجل",
   SYNC_PAGES: "مزامنة صفحات الموقع",
+  CLASSIFY_PAGES: "تصنيف صفحات الموقع بالموديل",
   LEGACY_IMPORT: "مستورد من النظام القديم"
 };
 

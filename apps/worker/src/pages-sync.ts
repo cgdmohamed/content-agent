@@ -1,11 +1,14 @@
 import { classifyPage, isInternalPageUrl } from "./site-pages-rules.js";
 import { query } from "./db.js";
+import { classifySitePages } from "./page-classifier.js";
 import { fetchSitePages, type WordPressSite } from "./wordpress.js";
 
 export interface PagesSyncResult {
   total: number;
   created: number;
   gone: number;
+  /** Pages the model classified after this sync; null when it was not run or failed. */
+  classified: number | null;
 }
 
 /**
@@ -44,7 +47,14 @@ export async function syncPagesForSite(siteId: string): Promise<PagesSyncResult>
     gone = marked.rowCount ?? 0;
   }
   await query("UPDATE sites SET pages_synced_at = now(), updated_at = now() WHERE id = $1", [siteId]);
-  return { total: rows.length, created, gone };
+  // Pages the rules could only guess at are checked by the model once; a missing key or a spent budget must not fail the sync.
+  let classified: number | null = null;
+  try {
+    classified = (await classifySitePages(siteId, { onlyNew: true })).classified;
+  } catch (error) {
+    await query("INSERT INTO audit_logs (site_id, event_type, message, metadata) VALUES ($1, 'SITE_PAGES_CLASSIFY_FAILED', 'تعذر تصنيف الصفحات بالموديل بعد المزامنة', $2::jsonb)", [siteId, JSON.stringify({ error: error instanceof Error ? error.message : String(error) })]).catch(() => undefined);
+  }
+  return { total: rows.length, created, gone, classified };
 }
 
 /** Active sites whose page index is missing or older than a day. */

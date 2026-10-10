@@ -1,4 +1,4 @@
-import { Eye, EyeOff, ExternalLink, RefreshCw, Star } from "lucide-react";
+import { Eye, EyeOff, ExternalLink, RefreshCw, Sparkles, Star } from "lucide-react";
 import { useState, type ReactElement } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -45,6 +45,12 @@ export function SitePages(): ReactElement {
     onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["site-pages", id] })
   });
 
+  const classify = useMutation({
+    meta: { successMessage: "بدأ تصنيف الصفحات بالموديل. ستتحدث القائمة خلال لحظات" },
+    mutationFn: () => api.classifySitePages(id),
+    onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["site-pages", id] })
+  });
+
   if (pages.isLoading || counts.isLoading) return <LoadingState />;
   if (pages.isError || !pages.data || !counts.data) return <ErrorState label="تعذر تحميل صفحات الموقع." />;
   const siteName = site.data?.find((candidate) => candidate.id === id)?.name ?? "الموقع";
@@ -57,9 +63,14 @@ export function SitePages(): ReactElement {
         description="الصفحات التي يستخدمها النظام كروابط داخلية في المقالات: لا يربط المقال إلا بصفحة من هذه القائمة."
         actions={
           isAdmin ? (
-            <IconButton icon={RefreshCw} tone="primary" disabled={sync.isPending} onClick={() => sync.mutate()}>
-              {sync.isPending ? "جاري الإضافة للطابور..." : "مزامنة الصفحات"}
-            </IconButton>
+            <div className="flex flex-wrap gap-2">
+              <IconButton icon={Sparkles} disabled={classify.isPending} onClick={() => classify.mutate()}>
+                {classify.isPending ? "جاري الإضافة للطابور..." : "تصنيف بالموديل"}
+              </IconButton>
+              <IconButton icon={RefreshCw} tone="primary" disabled={sync.isPending} onClick={() => sync.mutate()}>
+                {sync.isPending ? "جاري الإضافة للطابور..." : "مزامنة الصفحات"}
+              </IconButton>
+            </div>
           ) : undefined
         }
       />
@@ -68,6 +79,7 @@ export function SitePages(): ReactElement {
         {total.hidden > 0 ? <> · <span className="tabular-nums">{total.hidden}</span> صفحة مخفية.</> : null}
       </p>
       <ActionError error={sync.error} />
+      <ActionError error={classify.error} />
       <ActionError error={update.error} />
 
       <section className="rounded-lg border border-slate-200 bg-white">
@@ -94,7 +106,7 @@ export function SitePages(): ReactElement {
         )}
       </section>
       <p className="text-xs text-slate-500">
-        تعديلك على نوع الصفحة أو أولويتها أو إخفائها يبقى كما هو بعد كل مزامنة. <Link to="/sites" className="text-teal hover:underline">العودة للمواقع</Link>
+        تعديلك على نوع الصفحة أو أولويتها أو إخفائها يبقى كما هو بعد كل مزامنة وبعد أي تصنيف بالموديل. «تصنيف بالموديل» يعيد النظر في الصفحات غير المعدّلة يدويًا (موديل «تصنيف صفحات الموقع» من الإعدادات). <Link to="/sites" className="text-teal hover:underline">العودة للمواقع</Link>
       </p>
     </div>
   );
@@ -108,7 +120,7 @@ function PageRow(props: { page: SitePageDto; isAdmin: boolean; onChange: (body: 
         <p className="flex items-center gap-2 font-medium">
           <span className="truncate">{page.title}</span>
           {page.language ? <span className="rounded bg-slate-100 px-1.5 text-xs text-slate-600" dir="ltr">{page.language.toUpperCase()}</span> : null}
-          {page.manual ? <span className="text-xs font-normal text-slate-400">معدّلة يدويًا</span> : null}
+          {page.source === "MANUAL" ? <span className="text-xs font-normal text-slate-400">معدّلة يدويًا</span> : page.source === "AI" ? <span className="text-xs font-normal text-slate-400">صنّفها الموديل</span> : null}
         </p>
         <a href={page.url} target="_blank" rel="noreferrer" className="inline-flex max-w-full items-center gap-1 truncate text-xs text-slate-500 hover:text-teal" dir="ltr">
           <span className="truncate">{page.url}</span><ExternalLink className="h-3 w-3 shrink-0" />

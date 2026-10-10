@@ -81,10 +81,19 @@ export async function resolveChainForContent(contentItemId: string, operation: M
      WHERE c.id = $1`,
     [contentItemId]
   );
+  return resolveChainFor(site.rows[0], operation);
+}
+
+/** Same resolution for work that belongs to a site rather than to one article (e.g. classifying its pages). */
+export async function resolveChainForSite(siteId: string, operation: ModelOperation): Promise<ResolvedModelChain> {
+  const site = await query<{ allowed_models: unknown; operation_models: unknown }>("SELECT allowed_models, operation_models FROM sites WHERE id = $1", [siteId]);
+  return resolveChainFor(site.rows[0], operation);
+}
+
+async function resolveChainFor(siteRow: { allowed_models: unknown; operation_models: unknown } | undefined, operation: ModelOperation): Promise<ResolvedModelChain> {
   const settings = await query<{ value: StoredSettings }>("SELECT value FROM system_settings WHERE key = 'production_settings'");
   const stored = settings.rows[0]?.value ?? {};
   const catalog = mergeModelCatalog(stored.customModels);
-  const siteRow = site.rows[0];
   const chain = resolveModelChain({
     operation,
     siteOverride: sanitizeOperationModels(siteRow?.operation_models, catalog)[operation],

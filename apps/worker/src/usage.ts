@@ -8,7 +8,10 @@ export interface SpendReservation {
   provider: string;
   model: string;
   operation: string;
-  contentItemId: string;
+  /** The article, or null/absent for site-level work (then `siteId` and `label` attribute the spend). */
+  contentItemId?: string | null;
+  siteId?: string;
+  label?: string;
   estimatedCostUsd: number;
 }
 
@@ -44,12 +47,14 @@ export async function reserveSpend(reservation: SpendReservation): Promise<strin
     );
     if (isBudgetExceeded(Number(spend.rows[0]?.total ?? 0), hardLimit)) throw new Error(budgetExceededMessage);
     // Attribute the spend to the site now, so it survives later deletion of the article.
-    const owner = await run<{ site_id: string; label: string }>("SELECT site_id, COALESCE(title, topic) AS label FROM content_items WHERE id = $1", [reservation.contentItemId]);
+    const owner = reservation.contentItemId
+      ? await run<{ site_id: string; label: string }>("SELECT site_id, COALESCE(title, topic) AS label FROM content_items WHERE id = $1", [reservation.contentItemId])
+      : { rows: [{ site_id: reservation.siteId ?? null, label: reservation.label ?? null }] as Array<{ site_id: string | null; label: string | null }> };
     const inserted = await run<{ id: string }>(
       `INSERT INTO api_usage_logs (provider, model, operation, content_item_id, site_id, content_label, estimated_cost_usd, success, error)
        VALUES ($1, $2, $3, $4, $5, $6, $7, false, 'RESERVED')
        RETURNING id`,
-      [reservation.provider, reservation.model, reservation.operation, reservation.contentItemId, owner.rows[0]?.site_id ?? null, owner.rows[0]?.label ?? null, reservation.estimatedCostUsd]
+      [reservation.provider, reservation.model, reservation.operation, reservation.contentItemId ?? null, owner.rows[0]?.site_id ?? null, owner.rows[0]?.label ?? null, reservation.estimatedCostUsd]
     );
     return inserted.rows[0]!.id;
   });

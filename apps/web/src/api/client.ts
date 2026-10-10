@@ -45,7 +45,7 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "حدث خطأ غير متوقع.";
 }
 
-export type ModelOperationKey = "ideas" | "research" | "writing" | "review" | "links" | "translation" | "image";
+export type ModelOperationKey = "ideas" | "research" | "writing" | "review" | "links" | "translation" | "pages" | "image";
 
 export interface ModelRefDto {
   provider: "anthropic" | "openai" | "perplexity" | "gemini";
@@ -102,8 +102,8 @@ export interface SitePageDto {
   kind: PageKindKey;
   priority: boolean;
   hidden: boolean;
-  /** An admin changed the kind/priority/visibility, so a sync no longer overwrites them. */
-  manual: boolean;
+  /** AUTO = guessed by rules, AI = judged by the model, MANUAL = set by an admin (never overwritten). */
+  source: "AUTO" | "AI" | "MANUAL";
   language: string | null;
   summary: string;
 }
@@ -620,6 +620,7 @@ export const api = {
   },
   updateSitePage: (id: string, pageId: string, body: { kind?: PageKindKey; priority?: boolean; hidden?: boolean }) =>
     request<{ ok: true }>(`/sites/${id}/pages/${pageId}`, { method: "PATCH", body: JSON.stringify(body) }),
+  classifySitePages: (id: string, onlyNew = false) => request<{ statusCode: 202; jobId: string; siteId: string }>(`/sites/${id}/classify-pages`, { method: "POST", body: JSON.stringify({ onlyNew }) }),
   syncSitePages: (id: string) => request<{ statusCode: 202; jobId: string; siteId: string }>(`/sites/${id}/sync-pages`, { method: "POST" }),
   syncGsc: (id: string) => request<{ statusCode: 202; jobId: string; siteId: string }>(`/sites/${id}/sync-gsc`, { method: "POST" }),
   jobs: () => request<JobsDto>("/jobs"),

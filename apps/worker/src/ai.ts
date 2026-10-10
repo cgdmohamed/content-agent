@@ -1,6 +1,6 @@
 import { findModel, textCostFromUsage, textCostUsd, type ModelProvider, type TextUsage } from "@content-agent/shared";
 import { effectiveHardLimit, isBudgetExceeded, ratesFor, estimateTokens, type PricedProvider } from "./budget.js";
-import { operationKeyFor, providerKey, resolveChainForContent, sanitizeProviderChain } from "./models.js";
+import { operationKeyFor, providerKey, resolveChainForContent, resolveChainForSite, sanitizeProviderChain } from "./models.js";
 import { releaseSpend, reserveSpend, settleSpend } from "./usage.js";
 
 export { effectiveHardLimit, isBudgetExceeded, sanitizeProviderChain };
@@ -8,7 +8,11 @@ export { effectiveHardLimit, isBudgetExceeded, sanitizeProviderChain };
 export type TextProviderName = "anthropic" | "openai" | "perplexity";
 
 export interface GenerateTextInput {
-  contentItemId: string;
+  /** The article the call is for; omit for site-level work and pass `siteId` instead. */
+  contentItemId?: string;
+  siteId?: string;
+  /** What the spend is attributed to in reports when there is no article (e.g. "تصنيف صفحات الموقع"). */
+  label?: string;
   /** Worker operation name, e.g. WRITE_DRAFT; the model chain is resolved from site/system settings. */
   operation: string;
   prompt: string;
@@ -69,7 +73,12 @@ const callers: Record<TextProviderName, (prompt: string, maxTokens: number, key:
 };
 
 export async function generateText(input: GenerateTextInput): Promise<GenerateTextResult> {
-  const resolved = await resolveChainForContent(input.contentItemId, operationKeyFor(input.operation));
+  const operationKey = operationKeyFor(input.operation);
+  const resolved = input.contentItemId
+    ? await resolveChainForContent(input.contentItemId, operationKey)
+    : input.siteId
+      ? await resolveChainForSite(input.siteId, operationKey)
+      : (() => { throw new Error("generateText يحتاج contentItemId أو siteId."); })();
   const chain = resolved.chain.filter((ref): ref is typeof ref & { provider: TextProviderName } => ref.provider !== "gemini");
   if (chain.length === 0) throw new Error("لا توجد مفاتيح ذكاء اصطناعي مهيأة للعملية النصية.");
 
@@ -86,6 +95,8 @@ export async function generateText(input: GenerateTextInput): Promise<GenerateTe
       model: ref.model,
       operation: input.operation,
       contentItemId: input.contentItemId,
+      siteId: input.siteId,
+      label: input.label,
       estimatedCostUsd: textCostUsd(spec, rates, promptTokens, maxTokens)
     });
     try {

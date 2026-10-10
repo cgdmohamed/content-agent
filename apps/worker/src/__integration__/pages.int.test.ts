@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, query } from "../db.js";
+import { classifySitePages } from "../page-classifier.js";
 import { syncPagesForSite } from "../pages-sync.js";
 import { processContentOperation } from "../processors.js";
 import { anthropicReply, integrationEnabled, json, mockFetch, resetDatabase, seedContent, seedSite, wordpressHost, wordpressResponder, type FetchMock } from "./helpers.js";
@@ -31,6 +32,16 @@ const initialPages = () => ({
   services: [wp("services/seo", 20, "خدمة تحسين محركات البحث"), wp("services/content", 21, "خدمة كتابة المحتوى")]
 });
 
+/** A fake model: answers the page-classification prompt from the page titles it was given. */
+function classifier(call: { url: URL; body: unknown }): Response | undefined {
+  if (call.url.hostname !== "api.anthropic.com") return undefined;
+  const prompt = String((call.body as { messages: Array<{ content: string }> }).messages[0]!.content);
+  const pages = JSON.parse(prompt.split("الصفحات (JSON):")[1]!.split("\n\n")[1]!) as Array<{ n: number; title: string }>;
+  const verdict = (title: string) =>
+    /خدمة/.test(title) ? { kind: "SERVICE", priority: true, hidden: false } : /اتصل/.test(title) ? { kind: "CONTACT", priority: false, hidden: false } : /نحن/.test(title) ? { kind: "ABOUT", priority: false, hidden: false } : /الخصوصية/.test(title) ? { kind: "OTHER", priority: false, hidden: true } : { kind: "ARTICLE", priority: false, hidden: false };
+  return anthropicReply(JSON.stringify(pages.map((page) => ({ n: page.n, ...verdict(page.title) }))));
+}
+
 describe.skipIf(!integrationEnabled)("site page index against real PostgreSQL", () => {
   beforeEach(async () => {
     await resetDatabase();
@@ -46,26 +57,31 @@ describe.skipIf(!integrationEnabled)("site page index against real PostgreSQL", 
   it("indexes pages and custom types, classifies them and keeps admin choices on the next sync", async () => {
     const siteId = await seedSite({ query });
     const state = { pages: initialPages() as Record<string, unknown[]> };
-    mock = mockFetch(siteWithPages(state));
+    mock = mockFetch(siteWithPages(state), classifier);
 
-    expect(await syncPagesForSite(siteId)).toEqual({ total: 7, created: 7, gone: 0 });
+    expect(await syncPagesForSite(siteId)).toEqual({ total: 7, created: 7, gone: 0, classified: 5 });
     const rows = (await query("SELECT title, kind, priority, hidden, language, wp_type FROM site_pages WHERE site_id = $1 ORDER BY wp_type, wp_id", [siteId])).rows;
     expect(rows.find((row) => row.title.startsWith("التسويق بالمحتوى"))).toMatchObject({ kind: "ARTICLE", language: "ar", title: "التسويق بالمحتوى للشركات – دليل" });
     expect(rows.find((row) => row.title === "سياسة الخصوصية")).toMatchObject({ hidden: true });
     expect(rows.find((row) => row.title === "اتصل بنا")).toMatchObject({ kind: "CONTACT" });
     expect(rows.filter((row) => row.wp_type === "service")).toEqual([expect.objectContaining({ kind: "SERVICE", priority: true }), expect.objectContaining({ kind: "SERVICE", priority: true })]);
+    // Posts are never sent to the model; the other five pages were classified by it and attributed to the site.
+    expect((await query("SELECT kind_source, count(*)::int AS n FROM site_pages WHERE site_id = $1 GROUP BY kind_source ORDER BY kind_source", [siteId])).rows).toEqual([{ kind_source: "AI", n: 5 }, { kind_source: "AUTO", n: 2 }]);
+    expect((await query("SELECT operation, site_id, content_item_id, content_label, success FROM api_usage_logs")).rows).toEqual([{ operation: "CLASSIFY_PAGES", site_id: siteId, content_item_id: null, content_label: "تصنيف صفحات الموقع", success: true }]);
     expect((await query("SELECT pages_synced_at FROM sites WHERE id = $1", [siteId])).rows[0]!.pages_synced_at).not.toBeNull();
 
     // An admin decision survives the next sync; a deleted page is marked gone, a new one is added.
     await query("UPDATE site_pages SET kind = 'PRODUCT', priority = false, kind_source = 'MANUAL' WHERE site_id = $1 AND title = 'خدمة كتابة المحتوى'", [siteId]);
     state.pages.services = [wp("services/content", 21, "خدمة كتابة المحتوى (محدّثة)")];
     state.pages.pages = [...state.pages.pages!, wp("services/new-page", 30, "صفحة جديدة")];
-    expect(await syncPagesForSite(siteId)).toMatchObject({ created: 1, gone: 1 });
+    expect(await syncPagesForSite(siteId)).toMatchObject({ created: 1, gone: 1, classified: 1 }); // only the new page goes to the model
     expect((await query("SELECT title, kind, priority FROM site_pages WHERE wp_id = '21'")).rows[0]).toEqual({ title: "خدمة كتابة المحتوى (محدّثة)", kind: "PRODUCT", priority: false });
     expect((await query("SELECT gone FROM site_pages WHERE wp_id = '20'")).rows[0]!.gone).toBe(true);
 
     // A broken/empty answer must not hide the whole index.
     state.pages = { posts: [], pages: [], services: [] };
+    mock.restore();
+    mock = mockFetch(siteWithPages(state));
     expect((await syncPagesForSite(siteId)).gone).toBe(0);
     expect((await query("SELECT count(*)::int AS n FROM site_pages WHERE site_id = $1 AND gone = false", [siteId])).rows[0]!.n).toBeGreaterThan(0);
   });
@@ -73,7 +89,7 @@ describe.skipIf(!integrationEnabled)("site page index against real PostgreSQL", 
   it("offers indexed pages to the writer, never the homepage, and limits repeated service links", async () => {
     const siteId = await seedSite({ query });
     const state = { pages: initialPages() as Record<string, unknown[]> };
-    mock = mockFetch(siteWithPages(state));
+    mock = mockFetch(siteWithPages(state), classifier);
     await syncPagesForSite(siteId);
     mock.restore();
 
@@ -121,5 +137,34 @@ describe.skipIf(!integrationEnabled)("site page index against real PostgreSQL", 
     expect(sent).toContain("unknown-page"); // unknown URLs are not proven dead, so they stay
     expect((await query("SELECT draft_html FROM content_items WHERE id = $1", [contentId])).rows[0]!.draft_html).toBe(draft);
     expect((await query("SELECT event_type FROM audit_logs WHERE content_item_id = $1 AND event_type = 'INTERNAL_LINKS_REMOVED'", [contentId])).rowCount).toBe(1);
+  });
+
+  it("keeps admin decisions when the model re-classifies, and survives a failing model", async () => {
+    const siteId = await seedSite({ query });
+    await query(
+      `INSERT INTO site_pages (site_id, wp_type, wp_id, url, title, kind, kind_source) VALUES
+       ($1, 'page', '1', $2, 'خدمة يدوية', 'PRODUCT', 'MANUAL'),
+       ($1, 'page', '2', $3, 'خدمة تلقائية', 'OTHER', 'AUTO'),
+       ($1, 'page', '3', $4, 'اتصل بنا', 'OTHER', 'AI')`,
+      [siteId, `${wordpressHost}/a/`, `${wordpressHost}/b/`, `${wordpressHost}/c/`]
+    );
+    mock = mockFetch(classifier);
+    expect(await classifySitePages(siteId, { onlyNew: false })).toEqual({ classified: 2, skipped: 0 });
+    expect((await query("SELECT title, kind, kind_source FROM site_pages WHERE site_id = $1 ORDER BY wp_id", [siteId])).rows).toEqual([
+      { title: "خدمة يدوية", kind: "PRODUCT", kind_source: "MANUAL" },
+      { title: "خدمة تلقائية", kind: "SERVICE", kind_source: "AI" },
+      { title: "اتصل بنا", kind: "CONTACT", kind_source: "AI" }
+    ]);
+    // "Only new pages" leaves model-classified pages alone: nothing left to send, so no model call.
+    mock.restore();
+    mock = mockFetch();
+    expect(await classifySitePages(siteId, { onlyNew: true })).toEqual({ classified: 0, skipped: 0 });
+
+    // A model that answers nonsense fails the job without touching the pages.
+    await query("UPDATE site_pages SET kind_source = 'AUTO' WHERE wp_id = '2'");
+    mock.restore();
+    mock = mockFetch((call) => (call.url.hostname === "api.anthropic.com" ? anthropicReply("لا أعرف") : undefined));
+    await expect(classifySitePages(siteId, { onlyNew: true })).rejects.toThrow("JSON");
+    expect((await query("SELECT kind_source FROM site_pages WHERE wp_id = '2'")).rows[0]!.kind_source).toBe("AUTO");
   });
 });
