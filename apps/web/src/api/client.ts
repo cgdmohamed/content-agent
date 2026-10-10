@@ -45,7 +45,7 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "حدث خطأ غير متوقع.";
 }
 
-export type ModelOperationKey = "ideas" | "research" | "writing" | "review" | "links" | "image";
+export type ModelOperationKey = "ideas" | "research" | "writing" | "review" | "links" | "translation" | "image";
 
 export interface ModelRefDto {
   provider: "anthropic" | "openai" | "perplexity" | "gemini";
@@ -75,6 +75,23 @@ export interface ModelOperationDto {
 
 export type OperationModelsDto = Partial<Record<ModelOperationKey, ModelRefDto[]>>;
 
+export interface SiteLanguageDto {
+  code: string;
+  name: string;
+  locale?: string;
+  isRtl: boolean;
+  isDefault: boolean;
+}
+
+export interface TranslationItemDto {
+  id: string;
+  language: string | null;
+  state: ContentState;
+  title: string;
+  wordpressPostUrl: string | null;
+  isSource: boolean;
+}
+
 export interface SiteDto {
   id: string;
   name: string;
@@ -90,6 +107,11 @@ export interface SiteDto {
   wordpressStatus: IntegrationStatus;
   rankMathStatus: IntegrationStatus;
   gscStatus: IntegrationStatus;
+  polylangStatus: IntegrationStatus;
+  /** Polylang languages synced from WordPress; empty for single-language sites. */
+  languages: SiteLanguageDto[];
+  /** Languages every approved article is also translated and published in. */
+  publishLanguages: string[];
   contentCount: number;
   publishedCount: number;
 }
@@ -106,6 +128,9 @@ export interface ContentDto {
   targetKeyword: string;
   state: ContentState;
   mode: ContentMode;
+  /** Polylang language code of a translation; null for the article in the site's own language. */
+  language: string | null;
+  translationOf: string | null;
   scheduledDate: string | null;
   score: number;
   updatedAt: string;
@@ -134,6 +159,9 @@ export interface ContentListResponseDto {
 
 export interface ContentDetailDto extends ContentDto {
   wordpressUrl: string;
+  direction: "rtl" | "ltr";
+  /** The source article and its translations (empty when the article has none). */
+  translations: TranslationItemDto[];
   ideas: Array<{ title: string; targetKeyword: string; angle: string }>;
   selectedIdea: { title?: string; targetKeyword?: string; angle?: string } | null;
   draftHtml: string;
@@ -522,6 +550,8 @@ export const api = {
   skipImage: (id: string) => request<ContentDetailDto>(`/content/${id}/skip-image`, { method: "POST" }),
   uploadContentImage: (id: string, body: { imageBase64: string; mimeType: string; filename: string; imageAlt?: string }) =>
     request<ContentDetailDto>(`/content/${id}/upload-image`, { method: "POST", body: JSON.stringify(body) }),
+  createTranslations: (id: string, languages: string[]) => request<{ sourceId: string; created: string[]; existing: string[]; translations: TranslationItemDto[] }>(`/content/${id}/translations`, { method: "POST", body: JSON.stringify({ languages }) }),
+  publishTranslations: (id: string) => request<{ sourceId: string; queued: string[]; translations: TranslationItemDto[] }>(`/content/${id}/translations/publish`, { method: "POST" }),
   approveContent: (id: string) => request<ContentDetailDto>(`/content/${id}/approve`, { method: "PATCH" }),
   scheduleContent: (id: string, scheduledPublishAt: string) =>
     request<ContentDetailDto>(`/content/${id}/schedule`, { method: "PATCH", body: JSON.stringify({ scheduledPublishAt }) }),
@@ -550,11 +580,13 @@ export const api = {
     status?: "ACTIVE" | "DISABLED";
     allowedModels?: string[];
     operationModels?: OperationModelsDto;
+    publishLanguages?: string[];
   }) => request<SiteDto>(`/sites/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteSite: (id: string) => request<{ ok: true; id: string; hiddenContent: number }>(`/sites/${id}`, { method: "DELETE" }),
   testWordPress: (id: string) => request<{ id: string; status: IntegrationStatus; message: string }>(`/sites/${id}/test-wordpress`, { method: "POST" }),
   testRankMath: (id: string) => request<{ id: string; status: IntegrationStatus; message: string }>(`/sites/${id}/test-rankmath`, { method: "POST" }),
   testGsc: (id: string) => request<{ id: string; status: IntegrationStatus; message: string }>(`/sites/${id}/test-gsc`, { method: "POST" }),
+  syncLanguages: (id: string) => request<{ id: string; status: IntegrationStatus; message: string; languages: SiteLanguageDto[] }>(`/sites/${id}/sync-languages`, { method: "POST" }),
   syncGsc: (id: string) => request<{ statusCode: 202; jobId: string; siteId: string }>(`/sites/${id}/sync-gsc`, { method: "POST" }),
   jobs: () => request<JobsDto>("/jobs"),
   retryJob: (id: string) => request<{ statusCode: 202; jobId: string }>(`/jobs/${id}/retry`, { method: "POST" }),

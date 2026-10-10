@@ -30,6 +30,7 @@ type ContentOperation =
   | "WRITE_DRAFT"
   | "REVIEW_DRAFT"
   | "OPTIMIZE_LINKS"
+  | "TRANSLATE_CONTENT"
   | "GENERATE_IMAGE"
   | "SKIP_IMAGE"
   | "APPROVE"
@@ -256,6 +257,7 @@ function queueForOperation(operation: string): string {
     WRITE_DRAFT: "content-writing",
     REVIEW_DRAFT: "content-review",
     OPTIMIZE_LINKS: "content-review",
+    TRANSLATE_CONTENT: "content-writing",
     GENERATE_IMAGE: "content-image",
     PUBLISH: "wordpress-publish"
   };

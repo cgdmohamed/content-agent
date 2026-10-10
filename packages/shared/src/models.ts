@@ -2,7 +2,7 @@
 
 export type ModelProvider = "anthropic" | "openai" | "perplexity" | "gemini";
 export type ModelKind = "text" | "image";
-export type ModelOperation = "ideas" | "research" | "writing" | "review" | "links" | "image";
+export type ModelOperation = "ideas" | "research" | "writing" | "review" | "links" | "translation" | "image";
 export type ImageSize = "1K" | "2K" | "4K";
 
 export interface ModelRef {
@@ -38,6 +38,7 @@ export const modelOperations: Array<{ key: ModelOperation; label: string; kind: 
   { key: "writing", label: "كتابة المسودة", kind: "text", workerOperation: "WRITE_DRAFT" },
   { key: "review", label: "المراجعة", kind: "text", workerOperation: "REVIEW_DRAFT" },
   { key: "links", label: "الروابط الداخلية", kind: "text", workerOperation: "OPTIMIZE_LINKS" },
+  { key: "translation", label: "الترجمة", kind: "text", workerOperation: "TRANSLATE_CONTENT" },
   { key: "image", label: "الصورة المميزة", kind: "image", workerOperation: "GENERATE_IMAGE" }
 ];
 

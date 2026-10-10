@@ -18,7 +18,7 @@
     "pretypecheck": "pnpm build:packages",
     "pretest": "pnpm build:packages",
     "prelint": "pnpm build:packages",
-    "test:integration": "pnpm -r --if-present test:integration && vitest run scripts/__tests__/backup.int.test.mjs",
+    "test:integration": "pnpm -r --workspace-concurrency=1 --if-present test:integration && vitest run scripts/__tests__/backup.int.test.mjs",
     "e2e": "playwright test -c e2e/playwright.config.ts",
     "pretest:integration": "pnpm build:packages"
   },

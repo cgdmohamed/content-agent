@@ -296,6 +296,65 @@ describe.skipIf(!enabled)("API over HTTP with real PostgreSQL and Redis", () => 
     expect((await api("/reports/sites/00000000-0000-4000-8000-000000000000/usage", { cookie: adminCookie })).status).toBe(404);
   });
 
+  it("creates translations of an approved article for a Polylang site and queues them", async () => {
+    const site = await api("/sites", {
+      method: "POST",
+      cookie: adminCookie,
+      body: { name: "موقع متعدد اللغات", wordpressUrl: "https://203.0.113.20", wordpressUsername: "editor", wordpressApplicationPassword: "app-password", market: "SA", language: "ar" }
+    });
+    const siteId = String(site.body.id);
+    expect(site.body).toMatchObject({ polylangStatus: "NOT_CONFIGURED", languages: [], publishLanguages: [] });
+    const db = new Client({ connectionString: process.env.DATABASE_URL });
+    await db.connect();
+    try {
+      const source = await db.query<{ id: string }>(
+        "INSERT INTO content_items (site_id, topic, title, draft_html, status) VALUES ($1, 'التسويق', 'عنوان', '<h2>عنوان</h2><p>نص</p>', 'IMAGE_READY') RETURNING id",
+        [siteId]
+      );
+      const sourceId = source.rows[0]!.id;
+
+      // Not connected to Polylang yet: refuse instead of creating items that can never be published.
+      expect((await api(`/content/${sourceId}/translations`, { method: "POST", cookie: adminCookie, body: { languages: ["en"] } })).status).toBe(400);
+
+      await db.query("UPDATE sites SET polylang_status = 'CONNECTED', polylang_languages = $2::jsonb WHERE id = $1", [
+        siteId,
+        JSON.stringify([{ code: "ar", name: "العربية", isRtl: true, isDefault: true }, { code: "en", name: "English", isRtl: false, isDefault: false }, { code: "fr", name: "Français", isRtl: false, isDefault: false }])
+      ]);
+      // Only languages the site really has can be saved as publish languages; the source language is dropped.
+      const updated = await api(`/sites/${siteId}`, { method: "PATCH", cookie: adminCookie, body: { publishLanguages: ["en", "ar", "de", "en"] } });
+      expect(updated.body.publishLanguages).toEqual(["en"]);
+      expect((await api(`/content/${sourceId}/translations`, { method: "POST", cookie: adminCookie, body: { languages: ["de", "ar"] } })).status).toBe(400);
+
+      const created = await api(`/content/${sourceId}/translations`, { method: "POST", cookie: adminCookie, body: { languages: ["fr", "en"] } });
+      expect(created.status).toBe(201);
+      expect(created.body.created).toEqual(["fr", "en"]);
+      const children = await db.query("SELECT id, language, status, translation_of FROM content_items WHERE translation_of = $1 ORDER BY language", [sourceId]);
+      expect(children.rows.map((row) => [row.language, row.status])).toEqual([["en", "QUEUED"], ["fr", "QUEUED"]]);
+      const jobs = await db.query("SELECT operation, queue_name FROM job_runs WHERE content_item_id = ANY($1)", [children.rows.map((row) => row.id)]);
+      expect(jobs.rows).toEqual([{ operation: "TRANSLATE_CONTENT", queue_name: "content-writing" }, { operation: "TRANSLATE_CONTENT", queue_name: "content-writing" }]);
+
+      // Asking again does not create duplicates, and a translation cannot be translated further.
+      const again = await api(`/content/${sourceId}/translations`, { method: "POST", cookie: adminCookie, body: { languages: ["en"] } });
+      expect(again.body).toMatchObject({ created: [], existing: ["en"] });
+      expect((await api(`/content/${children.rows[0]!.id}/translations`, { method: "POST", cookie: adminCookie, body: { languages: ["fr"] } })).status).toBe(400);
+      // While a translation is queued the normal pipeline cannot start on it.
+      expect((await api(`/content/${children.rows[0]!.id}/generate-ideas`, { method: "POST", cookie: adminCookie })).status).toBe(400);
+
+      const detail = await api(`/content/${sourceId}`, { cookie: adminCookie });
+      expect((detail.body.translations as Array<{ language: string | null; isSource: boolean }>).map((row) => [row.language, row.isSource])).toEqual([[null, true], ["fr", false], ["en", false]]);
+      const childDetail = await api(`/content/${children.rows[0]!.id}`, { cookie: adminCookie });
+      expect(childDetail.body).toMatchObject({ language: "en", translationOf: sourceId });
+
+      // Approving a new article on a site with default publish languages starts its translations by itself.
+      const second = await db.query<{ id: string }>("INSERT INTO content_items (site_id, topic, title, draft_html, status) VALUES ($1, 'ثانٍ', 'ثانٍ', '<p>x</p>', 'IMAGE_READY') RETURNING id", [siteId]);
+      expect((await api(`/content/${second.rows[0]!.id}/approve`, { method: "PATCH", cookie: adminCookie })).status).toBe(200);
+      const auto = await db.query("SELECT language, status FROM content_items WHERE translation_of = $1", [second.rows[0]!.id]);
+      expect(auto.rows).toEqual([{ language: "en", status: "QUEUED" }]);
+    } finally {
+      await db.end();
+    }
+  });
+
   it("backfills site attribution for usage rows written before migration 010", async () => {
     const db = new Client({ connectionString: process.env.DATABASE_URL });
     await db.connect();

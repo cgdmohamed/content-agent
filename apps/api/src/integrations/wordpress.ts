@@ -82,6 +82,54 @@ export async function testRankMathBridge(site: InternalSiteCredentials): Promise
   return { status: "CONNECTED", message: "جسر Rank Math متاح." };
 }
 
+export interface PolylangCheck extends ConnectionCheck {
+  languages: unknown[];
+}
+
+/**
+ * Finds out whether the site is multilingual and how Content Agent can write languages to it:
+ * the Content Agent bridge plugin (works with free Polylang) or Polylang Pro (its own REST fields).
+ */
+export async function fetchPolylangLanguages(site: InternalSiteCredentials): Promise<PolylangCheck> {
+  const base = safeWordPressUrl(site.wordpress_url);
+  const auth = `Basic ${Buffer.from(`${site.wordpress_username}:${decryptSecret(site.wordpress_application_password_encrypted)}`).toString("base64")}`;
+  const get = (path: string, method = "GET") =>
+    safeFetch(new URL(path, base), { method, headers: { Authorization: auth, Accept: "application/json" }, signal: AbortSignal.timeout(15_000) });
+
+  const bridge = await get("/wp-json/content-agent/v1/polylang");
+  if (bridge.status === 401 || bridge.status === 403) {
+    return { status: "PERMISSION_ERROR", message: "ووردبريس رفض صلاحيات قراءة لغات Polylang.", languages: [] };
+  }
+  if (bridge.ok) {
+    const data = (await bridge.json().catch(() => null)) as { polylangActive?: boolean; languages?: unknown[] } | null;
+    if (!data?.polylangActive) return { status: "NOT_CONFIGURED", message: "جسر Polylang مثبت لكن Polylang نفسه غير مفعّل على الموقع.", languages: [] };
+    if (!data.languages?.length) return { status: "NOT_CONFIGURED", message: "لا توجد لغات مضافة في Polylang.", languages: [] };
+    return { status: "CONNECTED", message: `تم العثور على ${data.languages.length} لغات.`, languages: data.languages };
+  }
+  if (bridge.status !== 404) return { status: "ERROR", message: `فشل فحص Polylang برمز ${bridge.status}.`, languages: [] };
+
+  // No bridge: Polylang may still be there (3.7+ exposes pll/v1) and Pro writes languages on its own.
+  const languages = await get("/wp-json/pll/v1/languages");
+  if (languages.status === 404) return { status: "NOT_CONFIGURED", message: "Polylang غير مثبت على الموقع (موقع بلغة واحدة).", languages: [] };
+  if (languages.status === 401 || languages.status === 403) return { status: "PERMISSION_ERROR", message: "ووردبريس رفض صلاحيات قراءة لغات Polylang.", languages: [] };
+  if (!languages.ok) return { status: "ERROR", message: `فشل فحص Polylang برمز ${languages.status}.`, languages: [] };
+  const rows = (await languages.json().catch(() => [])) as Array<Record<string, unknown>>;
+  const schema = (await (await get("/wp-json/wp/v2/posts", "OPTIONS")).json().catch(() => null)) as { schema?: { properties?: Record<string, unknown> } } | null;
+  const properties = schema?.schema?.properties ?? {};
+  if (!("lang" in properties) || !("translations" in properties)) {
+    return { status: "BRIDGE_MISSING", message: "Polylang موجود لكن جسر Polylang غير مثبت (مطلوب مع النسخة المجانية).", languages: [] };
+  }
+  const settings = (await (await get("/wp-json/pll/v1/settings")).json().catch(() => null)) as { default_lang?: string } | null;
+  const mapped = (Array.isArray(rows) ? rows : []).map((row) => ({
+    code: row.slug,
+    name: row.name,
+    locale: row.locale,
+    isRtl: row.is_rtl,
+    isDefault: settings?.default_lang ? row.slug === settings.default_lang : false
+  }));
+  return { status: "CONNECTED", message: `تم العثور على ${mapped.length} لغات.`, languages: mapped };
+}
+
 export async function updateWordPressPostStatus(site: InternalSiteCredentials, postId: string, status: "draft" | "trash"): Promise<{ id: string; status: string }> {
   const base = safeWordPressUrl(site.wordpress_url);
   const password = decryptSecret(site.wordpress_application_password_encrypted);

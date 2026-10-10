@@ -16,6 +16,7 @@ import { Tabs } from "../ui/Tabs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { nextPrimaryOperation, scoreContent, type ContentOperation, type ContentState } from "@content-agent/shared";
 import { api, type ContentActivityDto } from "../api/client";
+import { ArticleLanguages } from "./ArticleLanguages";
 import { useCurrentUser } from "../auth";
 import { eventTypeLabel, operationLabel, operationLabels, providerLabel, queueLabel, stateLabels } from "../ui/labels";
 import { ActionError, ErrorState, LoadingState } from "../ui/StateViews";
@@ -44,10 +45,11 @@ export function ArticleWorkspace(): ReactElement {
   const [scheduledAt, setScheduledAt] = useState("");
   const [competitorModalOpen, setCompetitorModalOpen] = useState(false);
   const [imageDragActive, setImageDragActive] = useState(false);
-  const [sideTab, setSideTab] = useState<"seo" | "image" | "publish" | "history">("seo");
+  const [sideTab, setSideTab] = useState<"seo" | "image" | "publish" | "languages" | "history">("seo");
   const [recoverableDraft, setRecoverableDraft] = useState<string | null>(null);
   const draftCheckedRef = useRef(false);
   const content = useQuery({ queryKey: ["content", id], queryFn: () => api.contentItem(id), enabled: Boolean(id), refetchInterval: 5000 });
+  const sites = useQuery({ queryKey: ["sites"], queryFn: api.sites });
   const selectIdea = useMutation({
     meta: { successMessage: "تم اختيار الفكرة" },
     mutationFn: (ideaIndex: number) => api.selectIdea(id, ideaIndex),
@@ -211,6 +213,10 @@ export function ArticleWorkspace(): ReactElement {
   if (content.isError || !content.data) return <ErrorState label="تعذر تحميل المقال." />;
 
   const currentState = content.data.state as ContentState;
+  const site = sites.data?.find((candidate) => candidate.id === content.data.siteId);
+  const showLanguages = content.data.translations.length > 0 || (site?.polylangStatus === "CONNECTED" && site.languages.length > 1);
+  // A translation waits in QUEUED while the AI translates it; the normal pipeline buttons must stay off.
+  const translating = Boolean(content.data.translationOf) && currentState === "QUEUED";
   const primaryOperation = nextPrimaryOperation(currentState);
   const score = scoreContent({
     title: content.data.title,
@@ -239,17 +245,18 @@ export function ArticleWorkspace(): ReactElement {
           <div className="min-w-0">
             <Link to="/content" className="text-sm text-teal hover:underline">← مكتبة المحتوى</Link>
             <h1 className="mt-1 text-xl font-semibold">{content.data.title}</h1>
+            {content.data.language ? <p className="mt-1 text-xs text-slate-500">ترجمة · <span dir="ltr">{content.data.language.toUpperCase()}</span></p> : null}
           </div>
           <div className="flex flex-wrap items-center gap-2">
           <button
             className="inline-flex items-center gap-2 rounded-md bg-teal px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
-            disabled={!isRunnableArticleOperation(currentState, primaryOperation, user.role === "ADMIN") || runPrimary.isPending}
+            disabled={translating || !isRunnableArticleOperation(currentState, primaryOperation, user.role === "ADMIN") || runPrimary.isPending}
             onClick={() => {
               if (isRunnableArticleOperation(currentState, primaryOperation, user.role === "ADMIN")) runPrimary.mutate(primaryOperation);
             }}
           >
             {runPrimary.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            {runPrimary.isPending ? actionInProgressLabel(runPrimary.variables) : articleActionLabel(currentState, primaryOperation, user.role === "ADMIN")}
+            {translating ? "جاري الترجمة..." : runPrimary.isPending ? actionInProgressLabel(runPrimary.variables) : articleActionLabel(currentState, primaryOperation, user.role === "ADMIN")}
           </button>
           <button
             className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
@@ -301,8 +308,8 @@ export function ArticleWorkspace(): ReactElement {
             </div>
           ) : null}
           <label className="text-sm font-semibold text-slate-600">العنوان</label>
-          <input ref={titleRef} className="mt-2 w-full rounded-md border border-slate-200 px-3 py-2 text-lg font-semibold" defaultValue={content.data.title} dir="rtl" />
-          <div className="mt-5 overflow-hidden rounded-md border border-slate-200 bg-white" dir="rtl">
+          <input ref={titleRef} className="mt-2 w-full rounded-md border border-slate-200 px-3 py-2 text-lg font-semibold" defaultValue={content.data.title} dir={content.data.direction} />
+          <div className="mt-5 overflow-hidden rounded-md border border-slate-200 bg-white" dir={content.data.direction}>
             {recoverableDraft !== null ? (
               <div role="alert" className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
                 <span>وُجدت تعديلات غير محفوظة من جلسة سابقة على هذا الجهاز.</span>
@@ -328,6 +335,7 @@ export function ArticleWorkspace(): ReactElement {
               { id: "seo", label: "التحسين" },
               { id: "image", label: "الصورة" },
               { id: "publish", label: "النشر" },
+              ...(showLanguages ? [{ id: "languages" as const, label: "اللغات", count: content.data.translations.length || undefined }] : []),
               { id: "history", label: "السجل" }
             ]}
           />
@@ -481,6 +489,11 @@ export function ArticleWorkspace(): ReactElement {
           </Panel>
 
           </>
+          ) : null}
+          {sideTab === "languages" && showLanguages ? (
+            <Panel title="لغات المقال">
+              <ArticleLanguages content={content.data} site={site} isAdmin={user.role === "ADMIN"} />
+            </Panel>
           ) : null}
           {sideTab === "history" ? (
           <>

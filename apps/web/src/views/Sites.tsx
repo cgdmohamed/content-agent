@@ -1,7 +1,8 @@
-import { AlertTriangle, BarChart3, CircleDollarSign, Edit3, FilePlus2, Globe2, Power, RefreshCw, SearchCheck, Settings2, SquarePen, Trash2, Wifi } from "lucide-react";
+import { AlertTriangle, BarChart3, CircleDollarSign, Edit3, FilePlus2, Globe2, Languages, Power, RefreshCw, SearchCheck, Settings2, SquarePen, Trash2, Wifi } from "lucide-react";
 import { useState, type FormEvent, type ReactElement } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { findSiteLanguage } from "@content-agent/shared";
 import { api } from "../api/client";
 import type { SiteDto } from "../api/client";
 import { useCurrentUser } from "../auth";
@@ -44,6 +45,11 @@ export function Sites(): ReactElement {
   const testGsc = useMutation({
     meta: { successMessage: "اكتمل اختبار بحث جوجل" },
     mutationFn: api.testGsc,
+    onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["sites"] })
+  });
+  const syncLanguages = useMutation({
+    meta: { successMessage: "اكتملت مزامنة لغات Polylang" },
+    mutationFn: api.syncLanguages,
     onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["sites"] })
   });
   const syncGsc = useMutation({
@@ -109,6 +115,7 @@ export function Sites(): ReactElement {
         writingStandard: String(data.get("writingStandard") ?? ""),
         gscProperty: String(data.get("gscProperty") ?? ""),
         gscServiceAccountJson: optionalString(data.get("gscServiceAccountJson")),
+        ...(editingSite.languages.length > 0 ? { publishLanguages: data.getAll("publishLanguages").map(String) } : {}),
         ...(settings.data
           ? {
               allowedModels: data.getAll("allowedModels").map(String),
@@ -172,6 +179,12 @@ export function Sites(): ReactElement {
             <span className="text-sm font-medium text-slate-600">بيانات حساب خدمة جوجل الجديدة</span>
             <textarea name="gscServiceAccountJson" className="mt-1 min-h-28 w-full rounded-md border border-slate-200 px-3 py-2 text-left text-xs" dir="ltr" />
           </label>
+          <SiteLanguages
+            site={sites.data.find((candidate) => candidate.id === editingSite.id) ?? editingSite}
+            isSyncing={syncLanguages.isPending}
+            message={syncLanguages.variables === editingSite.id ? syncLanguages.data?.message : undefined}
+            onSync={() => syncLanguages.mutate(editingSite.id)}
+          />
           {settings.data ? (
             <div className="space-y-3 md:col-span-2">
               <h4 className="text-sm font-semibold text-slate-700">الذكاء الاصطناعي لهذا الموقع</h4>
@@ -210,7 +223,8 @@ export function Sites(): ReactElement {
               <div><dt className="text-xs text-slate-500">بحث جوجل</dt><dd className="mt-1"><Pill tone={integrationTone(site.gscStatus)} label={integrationLabels[site.gscStatus]} /></dd></div>
             </dl>
             <p className="mt-4 text-sm text-slate-500">
-              {site.market} · {languageLabel(site.language)} · <span className="tabular-nums">{site.publishedCount}</span> منشور من <span className="tabular-nums">{site.contentCount}</span>
+              {site.market} · {languageLabel(site.language)}
+              {site.languages.length > 1 ? <> · {site.languages.map((language) => language.code).join(" / ")}</> : null} · <span className="tabular-nums">{site.publishedCount}</span> منشور من <span className="tabular-nums">{site.contentCount}</span>
             </p>
             <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-4">
               <div className="flex flex-wrap items-center gap-1">
@@ -227,6 +241,7 @@ export function Sites(): ReactElement {
                       { label: "اختبار ووردبريس", icon: Wifi, onClick: () => testWp.mutate(site.id) },
                       { label: "اختبار رانك ماث", icon: Settings2, onClick: () => testRankMath.mutate(site.id) },
                       { label: "اختبار بحث جوجل", icon: SearchCheck, onClick: () => testGsc.mutate(site.id) },
+                      { label: "مزامنة لغات Polylang", icon: Languages, onClick: () => syncLanguages.mutate(site.id) },
                       { label: "مزامنة بحث جوجل", icon: RefreshCw, onClick: () => syncGsc.mutate(site.id) },
                       { label: site.status === "ACTIVE" ? "تعطيل الموقع" : "تفعيل الموقع", icon: Power, disabled: updateSite.isPending, onClick: () => updateSite.mutate({ id: site.id, body: { status: site.status === "ACTIVE" ? "DISABLED" : "ACTIVE" } }) },
                       { label: "حذف الموقع", icon: Trash2, danger: true, disabled: deleteSite.isPending, onClick: () => setDeleteTarget(site) }
@@ -241,6 +256,7 @@ export function Sites(): ReactElement {
                 <ActionError error={testRankMath.variables === site.id ? testRankMath.error : null} />
                 <ActionError error={testGsc.variables === site.id ? testGsc.error : null} />
                 <ActionError error={syncGsc.variables === site.id ? syncGsc.error : null} />
+                <ActionError error={syncLanguages.variables === site.id ? syncLanguages.error : null} />
                 <ActionError error={updateSite.variables?.id === site.id ? updateSite.error : null} />
                 <ActionError error={deleteSite.variables === site.id ? deleteSite.error : null} />
               </div>
@@ -324,5 +340,48 @@ function Input(props: { name: string; label: string; type?: string; placeholder?
         className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
       />
     </label>
+  );
+}
+
+const polylangStatusText: Record<string, string> = {
+  CONNECTED: "متصل",
+  NOT_CONFIGURED: "غير مفعّل (موقع بلغة واحدة)",
+  BRIDGE_MISSING: "ينقصه جسر Polylang",
+  PERMISSION_ERROR: "خطأ صلاحيات",
+  ERROR: "خطأ"
+};
+
+/** Languages the site has in Polylang and which of them every approved article is also published in. */
+function SiteLanguages(props: { site: SiteDto; isSyncing: boolean; message?: string; onSync: () => void }): ReactElement {
+  const { site } = props;
+  const sourceCode = findSiteLanguage(site.languages, site.language)?.code;
+  const targets = site.languages.filter((language) => language.code !== sourceCode);
+  return (
+    <div className="space-y-3 rounded-md border border-slate-200 p-4 md:col-span-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h4 className="text-sm font-semibold text-slate-700">لغات الموقع (Polylang)</h4>
+          <p className="mt-1 text-xs text-slate-500">لنشر المقال نفسه بعدة لغات: فعّل Polylang على ووردبريس وثبّت جسر Polylang ثم زامن اللغات.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Pill tone={integrationTone(site.polylangStatus)} label={polylangStatusText[site.polylangStatus] ?? site.polylangStatus} />
+          <IconButton icon={Languages} onClick={props.onSync} disabled={props.isSyncing}>{props.isSyncing ? "جاري المزامنة..." : "مزامنة اللغات"}</IconButton>
+        </div>
+      </div>
+      {props.message ? <p className="text-xs text-slate-600">{props.message}</p> : null}
+      {targets.length > 0 ? (
+        <fieldset key={targets.map((language) => language.code).join(",")} className="space-y-2">
+          <legend className="text-xs font-medium text-slate-500">اللغات الإضافية عند اعتماد أي مقال (ترجمة تلقائية ثم نشر)</legend>
+          <div className="flex flex-wrap gap-2">
+            {targets.map((language) => (
+              <label key={language.code} className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-3 py-1.5 text-sm">
+                <input type="checkbox" name="publishLanguages" value={language.code} defaultChecked={site.publishLanguages.includes(language.code)} className="h-4 w-4" />
+                {language.name} <span className="text-xs text-slate-400" dir="ltr">{language.code}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      ) : null}
+    </div>
   );
 }

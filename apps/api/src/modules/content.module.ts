@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, Delete, Get, Injectable, Module, NotFoundException, Param, Patch, Post, Query, Req } from "@nestjs/common";
 import { ArrayMaxSize, IsArray, IsBoolean, IsDateString, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from "class-validator";
-import { findDuplicateMatches, nextPrimaryOperation, sanitizeArticleHtml, scoreContent, type ContentState } from "@content-agent/shared";
+import { findDuplicateMatches, findSiteLanguage, nextPrimaryOperation, normalizeSiteLanguages, sanitizeArticleHtml, sanitizeTargetLanguages, scoreContent, sourceLanguageCode, type ContentState } from "@content-agent/shared";
 import { AuditService, sanitizeAuditMetadata } from "../audit/audit.module.js";
 import { DatabaseService } from "../database/database.module.js";
 import { JobQueueService, normalizeBullJobId } from "../queue/job-queue.module.js";
@@ -85,6 +85,16 @@ class CreateBulkContentDto {
   @IsString()
   @MaxLength(fieldLimits.searchIntent)
   searchIntent?: string;
+}
+
+class CreateTranslationsDto {
+  /** Polylang language codes; omitted = the site's default publish languages. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(30)
+  @IsString({ each: true })
+  @MaxLength(12, { each: true })
+  languages?: string[];
 }
 
 class SelectIdeaDto {
@@ -213,6 +223,8 @@ interface ContentRow {
   target_keyword: string | null;
   status: ContentState;
   mode: "MANUAL" | "BULK" | "AUTO_PILOT";
+  language?: string | null;
+  translation_of?: string | null;
   scheduled_publish_at: Date | null;
   content_score: number;
   updated_at: Date;
@@ -327,7 +339,7 @@ class ContentService {
     const [result, total] = await Promise.all([
       this.db.query<ContentRow>(
       `SELECT c.id, c.site_id, s.name AS site_name, c.batch_id, b.name AS batch_name, b.created_at AS batch_created_at,
-              c.topic, c.title, c.target_keyword, c.status, c.mode,
+              c.topic, c.title, c.target_keyword, c.status, c.mode, c.language, c.translation_of,
               c.scheduled_publish_at, c.content_score, c.updated_at, c.created_at
        FROM content_items c
        JOIN sites s ON s.id = c.site_id
@@ -541,7 +553,7 @@ class ContentService {
 
   async get(id: string): Promise<Record<string, unknown>> {
     const result = await this.db.query(
-      `SELECT c.*, s.name AS site_name, s.wordpress_url
+      `SELECT c.*, s.name AS site_name, s.wordpress_url, s.language AS site_language, s.polylang_languages
        FROM content_items c
        JOIN sites s ON s.id = c.site_id
        WHERE c.id = $1
@@ -550,7 +562,7 @@ class ContentService {
     );
     if (!result.rowCount) throw new NotFoundException("عنصر المحتوى غير موجود");
     const row = result.rows[0] as Record<string, unknown>;
-    const [audit, jobs, usage, versions] = await Promise.all([this.contentAudit(id), this.contentJobs(id), this.contentUsage(id), this.contentVersions(id)]);
+    const [audit, jobs, usage, versions, translations] = await Promise.all([this.contentAudit(id), this.contentJobs(id), this.contentUsage(id), this.contentVersions(id), this.translationGroup(id, row.translation_of as string | null)]);
     return {
       id: row.id,
       siteId: row.site_id,
@@ -561,6 +573,10 @@ class ContentService {
       targetKeyword: row.target_keyword ?? "",
       state: row.status,
       mode: row.mode,
+      language: row.language ?? null,
+      translationOf: row.translation_of ?? null,
+      direction: contentDirection(row.language as string | null, row.site_language as string, row.polylang_languages),
+      translations,
       ideas: row.ideas ?? [],
       selectedIdea: row.selected_idea ?? null,
       draftHtml: row.draft_html ?? "",
@@ -582,8 +598,8 @@ class ContentService {
   }
 
   async enqueueOperation(id: string, operation: string, actorUserId?: string, options: { delayMs?: number } = {}): Promise<{ statusCode: 202; jobId: string; contentItemId: string }> {
-    const current = await this.db.query<{ status: ContentState; site_status: "ACTIVE" | "DISABLED" }>(
-      `SELECT c.status, s.status AS site_status
+    const current = await this.db.query<{ status: ContentState; site_status: "ACTIVE" | "DISABLED"; translation_of: string | null }>(
+      `SELECT c.status, c.translation_of, s.status AS site_status
        FROM content_items c
        JOIN sites s ON s.id = c.site_id
        WHERE c.id = $1`,
@@ -594,6 +610,10 @@ class ContentService {
       throw new BadRequestException("لا يمكن تشغيل مهمة على موقع معطل.");
     }
     const state = current.rows[0]!.status;
+    // A translation waits in QUEUED until its translation job finishes; the normal pipeline must not start on it.
+    if (current.rows[0]!.translation_of && state === "QUEUED" && operation !== "TRANSLATE_CONTENT") {
+      throw new BadRequestException("الترجمة قيد التنفيذ، انتظر اكتمالها.");
+    }
     if (!canRunOperation(state, operation)) {
       throw new BadRequestException(`لا يمكن تنفيذ هذه العملية في الحالة الحالية: ${state}`);
     }
@@ -762,7 +782,163 @@ class ContentService {
       metadata: { autoPublish }
     });
     if (autoPublish) await this.enqueueOperation(id, "PUBLISH", actorUserId);
+    await this.autoTranslate(id, actorUserId);
     return this.get(id);
+  }
+
+  /** Approving an article on a multilingual site starts its translations into the site's default publish languages. */
+  private async autoTranslate(id: string, actorUserId?: string): Promise<void> {
+    const site = await this.db.query<{ publish_languages: unknown; polylang_status: string; translation_of: string | null }>(
+      `SELECT s.publish_languages, s.polylang_status, c.translation_of
+       FROM content_items c JOIN sites s ON s.id = c.site_id
+       WHERE c.id = $1`,
+      [id]
+    );
+    const row = site.rows[0];
+    if (!row || row.translation_of || row.polylang_status !== "CONNECTED") return;
+    if (!Array.isArray(row.publish_languages) || row.publish_languages.length === 0) return;
+    try {
+      await this.createTranslations(id, undefined, actorUserId);
+    } catch (error) {
+      // The approval already succeeded; the admin can start translations again from the article.
+      await this.audit.record({
+        actorUserId,
+        contentItemId: id,
+        eventType: "CONTENT_TRANSLATION_FAILED_TO_START",
+        message: "تعذر بدء الترجمات تلقائيًا",
+        metadata: { error: error instanceof Error ? error.message : String(error) }
+      });
+    }
+  }
+
+  /** The source article and its translations, for the language switcher of the article screen. */
+  private async translationGroup(id: string, translationOf: string | null): Promise<Array<Record<string, unknown>>> {
+    const rootId = translationOf ?? id;
+    const group = await this.db.query<{ id: string; language: string | null; status: string; title: string | null; topic: string; wordpress_post_url: string | null; translation_of: string | null }>(
+      `SELECT id, language, status, title, topic, wordpress_post_url, translation_of
+       FROM content_items
+       WHERE id = $1 OR translation_of = $1
+       ORDER BY (translation_of IS NULL) DESC, created_at ASC`,
+      [rootId]
+    );
+    if (group.rowCount === 1 && !translationOf) return [];
+    return group.rows.map((row) => ({
+      id: row.id,
+      language: row.language,
+      state: row.status,
+      title: row.title ?? row.topic,
+      wordpressPostUrl: row.wordpress_post_url,
+      isSource: row.translation_of === null
+    }));
+  }
+
+  /**
+   * Creates one translation item per target language and queues the AI translation. The item waits in QUEUED and
+   * lands in IMAGE_READY when translated, so it goes through the same approval and publishing steps as any article.
+   */
+  async createTranslations(id: string, languages: string[] | undefined, actorUserId?: string): Promise<Record<string, unknown>> {
+    const result = await this.db.query<{
+      status: ContentState;
+      title: string | null;
+      draft_html: string | null;
+      topic: string;
+      language: string | null;
+      translation_of: string | null;
+      wordpress_media_id: string | null;
+      image_url: string | null;
+      image_prompt: string | null;
+      site_id: string;
+      site_status: "ACTIVE" | "DISABLED";
+      site_language: string;
+      polylang_status: string;
+      polylang_languages: unknown;
+      publish_languages: unknown;
+    }>(
+      `SELECT c.status, c.title, c.draft_html, c.topic, c.language, c.translation_of, c.wordpress_media_id, c.image_url, c.image_prompt, c.site_id,
+              s.status AS site_status, s.language AS site_language, s.polylang_status, s.polylang_languages, s.publish_languages
+       FROM content_items c JOIN sites s ON s.id = c.site_id
+       WHERE c.id = $1`,
+      [id]
+    );
+    const source = result.rows[0];
+    if (!source) throw new NotFoundException("عنصر المحتوى غير موجود");
+    assertActiveContentSite(source.site_status);
+    if (source.translation_of) throw new BadRequestException("هذا المقال نفسه ترجمة؛ ابدأ الترجمة من المقال الأصلي.");
+    if (source.polylang_status !== "CONNECTED") throw new BadRequestException("الموقع غير متصل بـ Polylang. افتح المواقع واضغط مزامنة اللغات أولًا.");
+    if (!["IMAGE_READY", "APPROVED", "SCHEDULED", "PUBLISHED"].includes(source.status) || !source.title || !source.draft_html) {
+      throw new BadRequestException("يمكن الترجمة بعد اكتمال المقال (الصورة جاهزة أو أكثر).");
+    }
+    const available = normalizeSiteLanguages(source.polylang_languages);
+    const sourceCode = findSiteLanguage(available, sourceLanguageCode(source.language, source.site_language))?.code ?? sourceLanguageCode(source.language, source.site_language);
+    const targets = sanitizeTargetLanguages(languages ?? source.publish_languages, available, sourceCode);
+    if (targets.length === 0) throw new BadRequestException("لا توجد لغات صالحة للترجمة. اختر لغات الموقع من إعدادات الموقع.");
+
+    const created: string[] = [];
+    const existing: string[] = [];
+    for (const code of targets) {
+      const inserted = await this.db.query<{ id: string }>(
+        `INSERT INTO content_items (site_id, topic, title, status, mode, language, translation_of, wordpress_media_id, image_url, image_prompt, created_by)
+         VALUES ($1, $2, $3, 'QUEUED', 'MANUAL', $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (translation_of, language) WHERE translation_of IS NOT NULL DO NOTHING
+         RETURNING id`,
+        [source.site_id, source.topic, source.title, code, id, source.wordpress_media_id, source.image_url, source.image_prompt, actorUserId ?? null]
+      );
+      const childId = inserted.rows[0]?.id;
+      if (!childId) {
+        existing.push(code);
+        continue;
+      }
+      created.push(code);
+      await this.audit.record({
+        actorUserId,
+        contentItemId: childId,
+        eventType: "CONTENT_TRANSLATION_CREATED",
+        message: "تم إنشاء ترجمة للمقال",
+        metadata: { sourceContentItemId: id, language: code }
+      });
+      await this.enqueueOperation(childId, "TRANSLATE_CONTENT", actorUserId);
+    }
+    return { sourceId: id, created, existing, translations: await this.translationGroup(id, null) };
+  }
+
+  /**
+   * Approves (and queues publishing of) the translations that are ready, the way the source article was handled:
+   * scheduled like the source when it is scheduled, published now otherwise.
+   */
+  async publishTranslations(id: string, actorUserId?: string): Promise<Record<string, unknown>> {
+    const source = await this.db.query<{ status: ContentState; scheduled_publish_at: Date | null; translation_of: string | null }>(
+      "SELECT status, scheduled_publish_at, translation_of FROM content_items WHERE id = $1",
+      [id]
+    );
+    if (!source.rowCount) throw new NotFoundException("عنصر المحتوى غير موجود");
+    if (source.rows[0]!.translation_of) throw new BadRequestException("نفّذ هذا الإجراء من المقال الأصلي.");
+    const children = await this.db.query<{ id: string; status: ContentState; language: string }>(
+      "SELECT id, status, language FROM content_items WHERE translation_of = $1 AND status IN ('IMAGE_READY', 'APPROVED') ORDER BY created_at",
+      [id]
+    );
+    const scheduledAt = source.rows[0]!.status === "SCHEDULED" ? source.rows[0]!.scheduled_publish_at : null;
+    const queued: string[] = [];
+    for (const child of children.rows) {
+      if (child.status === "IMAGE_READY") await this.approveWithoutAutoSteps(child.id, actorUserId);
+      if (scheduledAt && scheduledAt.getTime() > Date.now()) {
+        await this.schedule(child.id, { scheduledPublishAt: scheduledAt.toISOString() }, actorUserId);
+      } else {
+        await this.enqueueOperation(child.id, "PUBLISH", actorUserId);
+      }
+      queued.push(child.language);
+    }
+    return { sourceId: id, queued, translations: await this.translationGroup(id, null) };
+  }
+
+  private async approveWithoutAutoSteps(id: string, actorUserId?: string): Promise<void> {
+    await this.db.query(
+      `UPDATE content_items
+       SET status = 'APPROVED', approved_at = now(), approved_by = $2, auto_publish = false,
+           last_successful_state = 'APPROVED', updated_at = now()
+       WHERE id = $1 AND status = 'IMAGE_READY'`,
+      [id, actorUserId ?? null]
+    );
+    await this.audit.record({ actorUserId, contentItemId: id, eventType: "CONTENT_APPROVED", message: "تم اعتماد ترجمة المقال مع المقال الأصلي", metadata: { viaSource: true } });
   }
 
   async schedule(id: string, body: ScheduleContentDto, actorUserId?: string): Promise<Record<string, unknown>> {
@@ -1639,6 +1815,14 @@ export function normalizedDelayMs(value: number | undefined): number {
   return Math.max(0, Math.trunc(value ?? 0));
 }
 
+/** Text direction of an article: the Polylang language's direction, else Arabic is RTL and everything else LTR. */
+export function contentDirection(itemLanguage: string | null, siteLanguage: string, polylangLanguages: unknown): "rtl" | "ltr" {
+  const code = sourceLanguageCode(itemLanguage, siteLanguage);
+  const language = findSiteLanguage(normalizeSiteLanguages(polylangLanguages), code);
+  if (language) return language.isRtl ? "rtl" : "ltr";
+  return ["ar", "he", "fa", "ur"].includes(code.split("-")[0]!) ? "rtl" : "ltr";
+}
+
 export function duplicateInitialState(input: {
   ideas?: unknown[] | null;
   selectedIdea?: unknown;
@@ -1672,6 +1856,7 @@ export function retryStateForOperation(operation: string, lastSuccessfulState: C
     WRITE_DRAFT: "GAPS_READY",
     REVIEW_DRAFT: "DRAFTED",
     GENERATE_IMAGE: "REVIEWED",
+    TRANSLATE_CONTENT: "QUEUED",
     PUBLISH: "APPROVED"
   };
   const state = fallback[operation];
@@ -1723,6 +1908,7 @@ function queueForOperation(operation: string): string {
     WRITE_DRAFT: "content-writing",
     REVIEW_DRAFT: "content-review",
     OPTIMIZE_LINKS: "content-review",
+    TRANSLATE_CONTENT: "content-writing",
     GENERATE_IMAGE: "content-image",
     PUBLISH: "wordpress-publish"
   };
@@ -1731,6 +1917,7 @@ function queueForOperation(operation: string): string {
 
 export function canRunOperation(state: ContentState, operation: string): boolean {
   if (operation === "SKIP_IMAGE") return state === "REVIEWED";
+  if (operation === "TRANSLATE_CONTENT") return state === "QUEUED";
   if (operation === "OPTIMIZE_LINKS") return ["DRAFTED", "REVIEWED", "IMAGE_READY"].includes(state);
   if (operation === "APPROVE") return state === "IMAGE_READY";
   if (operation === "SCHEDULE") return state === "APPROVED";
@@ -1770,6 +1957,8 @@ function toPublicContentRow(row: ContentRow): Record<string, unknown> {
     targetKeyword: row.target_keyword ?? "",
     state: row.status,
     mode: row.mode,
+    language: row.language ?? null,
+    translationOf: row.translation_of ?? null,
     scheduledDate: row.scheduled_publish_at,
     score: row.content_score,
     updatedAt: row.updated_at,
@@ -1900,6 +2089,18 @@ class ContentController {
   @Roles("ADMIN")
   approve(@Param("id") id: string, @Req() request: AuthenticatedRequest): Promise<Record<string, unknown>> {
     return this.content.approve(id, request.user?.id);
+  }
+
+  @Post(":id/translations")
+  @Roles("ADMIN")
+  createTranslations(@Param("id") id: string, @Body() body: CreateTranslationsDto, @Req() request: AuthenticatedRequest): Promise<Record<string, unknown>> {
+    return this.content.createTranslations(id, body.languages, request.user?.id);
+  }
+
+  @Post(":id/translations/publish")
+  @Roles("ADMIN")
+  publishTranslations(@Param("id") id: string, @Req() request: AuthenticatedRequest): Promise<Record<string, unknown>> {
+    return this.content.publishTranslations(id, request.user?.id);
   }
 
   @Post(":id/score")

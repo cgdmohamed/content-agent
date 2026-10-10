@@ -113,6 +113,23 @@ Never copy hardcoded legacy secrets into source code.
 ## WordPress Setup
 
 Use WordPress Application Passwords for REST authentication. Rank Math metadata requires the bridge snippet from the plugin in `wordpress/content-agent-rankmath-bridge/` (also packaged as `wordpress/content-agent-rankmath-bridge.zip`); the Sites page exposes a bridge test so Admins can distinguish `Connected`, `Bridge Missing`, and `Permission Error`.
+
+### Publishing in several languages (Polylang)
+
+A site that uses [Polylang](https://wordpress.org/plugins/polylang/) can publish the same article in every language it has.
+
+1. Install and activate Polylang (3.7+) on WordPress and add the site's languages.
+2. The free Polylang does not let the REST API set a post's language or link translations, so install `wordpress/content-agent-polylang-bridge.zip` (Plugins -> Add New -> Upload). With Polylang Pro the bridge is not needed: its own `lang`/`translations` REST fields are used.
+3. In **Sites** choose **Sync languages** (row menu or the edit form). The site shows `CONNECTED` with its languages, or `BRIDGE_MISSING` when the bridge is absent.
+4. In the edit form tick the extra languages to publish in. From then on, **approving an article starts its translations** into those languages automatically. They can also be started per article from the **Languages** tab (admins).
+
+How it works:
+
+- Each translation is a normal content item (`language`, `translation_of`), translated by the AI operation `TRANSLATE_CONTENT` (its model is chosen per site/operation under "Translation"; its spend appears in the usage reports like any other operation). It reuses the source's featured image and lands in `IMAGE_READY`.
+- **Approve and publish N translations** (Languages tab) approves every ready translation and queues publishing; it schedules them for the source's time when the source is scheduled.
+- Publishing sends `lang` with the post and creates categories/tags in the post's language; after each publish the already-published versions are linked through `translations` (`{ ar: 12, en: 34 }`), so the order of publishing does not matter. A linking failure does not unpublish anything: it is recorded in the article activity and retried at the next publish of the group.
+- Internal links inside a translation still point to the source-language URLs (the translation of those pages may not exist yet); review them in the translated article.
+
 Admins can edit site settings after creation. WordPress application passwords and GSC service-account JSON are never returned to the frontend; leaving those edit fields blank keeps the existing encrypted secret, while entering a new value replaces it.
 
 ## Production

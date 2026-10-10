@@ -389,7 +389,7 @@ export function ContentLibrary(): ReactElement {
                   isAdmin={isAdmin}
                   selected={selectedIds.includes(row.id)}
                   onSelect={(checked) => setSelectedIds((current) => checked ? [...new Set([...current, row.id])] : current.filter((id) => id !== row.id))}
-                  primaryAction={renderPrimaryAction(row.id, row.state, nextPrimaryOperation(row.state), runOperation.isPending, isAdmin, (operation) =>
+                  primaryAction={renderPrimaryAction(row.id, row.state, isTranslating(row) ? null : nextPrimaryOperation(row.state), runOperation.isPending, isAdmin, (operation) =>
                     runOperation.mutate({ id: row.id, operation })
                   )}
                   menuActions={[
@@ -530,7 +530,7 @@ function ContentRow(props: {
   menuActions: MenuAction[];
 }): ReactElement {
   const { row } = props;
-  const secondary = [row.site, row.targetKeyword || null, row.mode === "BULK" ? "دفعة" : null].filter(Boolean).join(" · ");
+  const secondary = [row.site, row.language ? `ترجمة ${row.language.toUpperCase()}` : null, row.targetKeyword || null, row.mode === "BULK" ? "دفعة" : null].filter(Boolean).join(" · ");
   return (
     <li className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 bg-white px-3 py-3 hover:bg-slate-50 md:grid-cols-[1rem_minmax(0,1fr)_7rem_3rem_6.5rem_11rem]">
       {props.isAdmin ? (
@@ -614,6 +614,11 @@ function SiteSelect(props: { sites: Array<{ id: string; name: string }> }): Reac
       </select>
     </label>
   );
+}
+
+/** A translation waits in QUEUED while the AI translates it; it has no pipeline step to run. */
+function isTranslating(row: Pick<ContentDto, "state" | "translationOf">): boolean {
+  return Boolean(row.translationOf) && row.state === "QUEUED";
 }
 
 function renderPrimaryAction(

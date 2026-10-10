@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertActiveContentSite, buildContentListFilter, buildJobId, canDeleteContentStatus, canRunOperation, clampNumber, contentVersionSummary, delayUntil, duplicateInitialState, duplicateTitle, isActiveSiteStatus, isPublishTime, mergeContentActivity, normalizedDelayMs, parseBulkTopics, parseFutureScheduleDate, retryOperationForFailedContent, retryStateForOperation, scheduledPublishDate } from "../content.module.js";
+import { assertActiveContentSite, contentDirection, buildContentListFilter, buildJobId, canDeleteContentStatus, canRunOperation, clampNumber, contentVersionSummary, delayUntil, duplicateInitialState, duplicateTitle, isActiveSiteStatus, isPublishTime, mergeContentActivity, normalizedDelayMs, parseBulkTopics, parseFutureScheduleDate, retryOperationForFailedContent, retryStateForOperation, scheduledPublishDate } from "../content.module.js";
 
 describe("content operation rules", () => {
   it("allows only the next pipeline operation", () => {
@@ -127,5 +127,24 @@ describe("content operation rules", () => {
     expect(filter.values[4]).toBe(100);
     expect(filter.values[5]).toEqual(new Date("2026-08-01T00:00:00.000Z"));
     expect(filter.values[6]).toEqual(new Date("2026-08-22T00:00:00.000Z"));
+  });
+});
+
+describe("translations", () => {
+  const languages = [{ code: "ar", name: "العربية", isRtl: true, isDefault: true }, { code: "en", name: "English", isRtl: false, isDefault: false }];
+
+  it("runs a translation job only on a queued item and keeps the pipeline away from it", () => {
+    expect(canRunOperation("QUEUED", "TRANSLATE_CONTENT")).toBe(true);
+    expect(canRunOperation("IMAGE_READY", "TRANSLATE_CONTENT")).toBe(false);
+    expect(retryOperationForFailedContent("TRANSLATE_CONTENT", null)).toBe("TRANSLATE_CONTENT");
+    expect(retryStateForOperation("TRANSLATE_CONTENT", null)).toBe("QUEUED");
+  });
+
+  it("derives the editor direction from the article language", () => {
+    expect(contentDirection(null, "ar", languages)).toBe("rtl");
+    expect(contentDirection("en", "ar", languages)).toBe("ltr");
+    expect(contentDirection("en", "ar", [])).toBe("ltr");
+    expect(contentDirection(null, "ar", [])).toBe("rtl");
+    expect(contentDirection("fa", "en", [])).toBe("rtl");
   });
 });

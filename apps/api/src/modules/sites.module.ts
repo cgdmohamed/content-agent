@@ -1,5 +1,5 @@
 import { BadRequestException, Body, Controller, Delete, Get, Injectable, Module, NotFoundException, Param, Patch, Post, Req } from "@nestjs/common";
-import { sanitizeAllowedModels, sanitizeOperationModels, type OperationModels } from "@content-agent/shared";
+import { normalizeSiteLanguages, sanitizeAllowedModels, sanitizeOperationModels, sanitizeTargetLanguages, type OperationModels } from "@content-agent/shared";
 import { ArrayMaxSize, IsArray, IsIn, IsObject, IsOptional, IsString, IsUrl, MaxLength } from "class-validator";
 import { AuditService } from "../audit/audit.module.js";
 import { DatabaseService } from "../database/database.module.js";
@@ -8,7 +8,7 @@ import { encryptSecret } from "../security/secret-vault.js";
 import { type AuthenticatedRequest, Roles } from "../security/access-control.js";
 import { fieldLimits } from "../security/payload-limits.js";
 import { normalizeGscProperty, normalizeGscServiceAccountJson, testGscConnection, type GscSiteCredentials } from "../integrations/google-search-console.js";
-import { safeWordPressUrl, testRankMathBridge, testWordPressConnection, type InternalSiteCredentials } from "../integrations/wordpress.js";
+import { fetchPolylangLanguages, safeWordPressUrl, testRankMathBridge, testWordPressConnection, type InternalSiteCredentials } from "../integrations/wordpress.js";
 import { buildJobId } from "./content.module.js";
 import { loadModelCatalog } from "./model-catalog.js";
 
@@ -120,6 +120,14 @@ class UpdateSiteDto {
   @IsOptional()
   @IsObject()
   operationModels?: Record<string, unknown>;
+
+  /** Polylang language codes to publish every new article in, besides its own language; [] publishes in one language. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(30)
+  @IsString({ each: true })
+  @MaxLength(12, { each: true })
+  publishLanguages?: string[];
 }
 
 interface SiteRow {
@@ -137,6 +145,9 @@ interface SiteRow {
   gsc_property: string | null;
   allowed_models: string[] | null;
   operation_models: OperationModels | null;
+  polylang_status: string;
+  polylang_languages: unknown;
+  publish_languages: unknown;
   content_count: string;
   published_count: string;
   created_at: Date;
@@ -154,7 +165,7 @@ class SitesService {
   async list(): Promise<Array<Record<string, unknown>>> {
     const result = await this.db.query<SiteRow>(
       `SELECT s.id, s.name, s.wordpress_url, s.wordpress_username, s.market, s.language, s.writing_standard,
-              s.wordpress_status, s.rank_math_status, s.gsc_status, s.status, s.gsc_property, s.allowed_models, s.operation_models, s.created_at, s.updated_at,
+              s.wordpress_status, s.rank_math_status, s.gsc_status, s.status, s.gsc_property, s.allowed_models, s.operation_models, s.polylang_status, s.polylang_languages, s.publish_languages, s.created_at, s.updated_at,
               COUNT(c.id)::text AS content_count,
               COUNT(c.id) FILTER (WHERE c.status = 'PUBLISHED')::text AS published_count
        FROM sites s
@@ -173,7 +184,7 @@ class SitesService {
       `INSERT INTO sites (name, wordpress_url, wordpress_username, wordpress_application_password_encrypted, market, language, writing_standard)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING id, name, wordpress_url, wordpress_username, market, language, writing_standard,
-                 wordpress_status, rank_math_status, gsc_status, status, gsc_property, allowed_models, operation_models, '0'::text AS content_count, '0'::text AS published_count, created_at, updated_at`,
+                 wordpress_status, rank_math_status, gsc_status, status, gsc_property, allowed_models, operation_models, polylang_status, polylang_languages, publish_languages, '0'::text AS content_count, '0'::text AS published_count, created_at, updated_at`,
       [
         body.name,
         wordpressUrl,
@@ -195,7 +206,7 @@ class SitesService {
       await this.update(String(result.rows[0]!.id), { gscProperty: body.gscProperty, gscServiceAccountJson: body.gscServiceAccountJson }, actorUserId);
       const updated = await this.db.query<SiteRow>(
         `SELECT id, name, wordpress_url, wordpress_username, market, language, writing_standard,
-                wordpress_status, rank_math_status, gsc_status, status, gsc_property, allowed_models, operation_models, '0'::text AS content_count, '0'::text AS published_count, created_at, updated_at
+                wordpress_status, rank_math_status, gsc_status, status, gsc_property, allowed_models, operation_models, polylang_status, polylang_languages, publish_languages, '0'::text AS content_count, '0'::text AS published_count, created_at, updated_at
          FROM sites WHERE id = $1`,
         [result.rows[0]!.id]
       );
@@ -215,6 +226,12 @@ class SitesService {
     const operationModels = body.operationModels !== undefined ? sanitizeOperationModels(body.operationModels, catalog) : null;
     const operationModelsValue = operationModels && Object.keys(operationModels).length > 0 ? operationModels : null;
 
+    let publishLanguages: string[] | null = null;
+    if (body.publishLanguages !== undefined) {
+      const current = await this.db.query<{ language: string; polylang_languages: unknown }>("SELECT language, polylang_languages FROM sites WHERE id = $1", [id]);
+      publishLanguages = sanitizeTargetLanguages(body.publishLanguages, normalizeSiteLanguages(current.rows[0]?.polylang_languages), current.rows[0]?.language);
+    }
+
     const result = await this.db.query<SiteRow>(
       `UPDATE sites SET
          name = COALESCE($2, name),
@@ -229,10 +246,11 @@ class SitesService {
          status = COALESCE($11, status),
          allowed_models = CASE WHEN $12::boolean THEN $13::jsonb ELSE allowed_models END,
          operation_models = CASE WHEN $14::boolean THEN $15::jsonb ELSE operation_models END,
+         publish_languages = CASE WHEN $16::boolean THEN $17::jsonb ELSE publish_languages END,
          updated_at = now()
        WHERE id = $1
        RETURNING id, name, wordpress_url, wordpress_username, market, language, writing_standard,
-                 wordpress_status, rank_math_status, gsc_status, status, gsc_property, allowed_models, operation_models, '0'::text AS content_count, '0'::text AS published_count, created_at, updated_at`,
+                 wordpress_status, rank_math_status, gsc_status, status, gsc_property, allowed_models, operation_models, polylang_status, polylang_languages, publish_languages, '0'::text AS content_count, '0'::text AS published_count, created_at, updated_at`,
       [
         id,
         body.name ?? null,
@@ -248,7 +266,9 @@ class SitesService {
         body.allowedModels !== undefined,
         allowedModels ? JSON.stringify(allowedModels) : null,
         body.operationModels !== undefined,
-        operationModelsValue ? JSON.stringify(operationModelsValue) : null
+        operationModelsValue ? JSON.stringify(operationModelsValue) : null,
+        publishLanguages !== null,
+        JSON.stringify(publishLanguages ?? [])
       ]
     );
     await this.audit.record({
@@ -285,6 +305,26 @@ class SitesService {
     await this.db.query("UPDATE sites SET rank_math_status = $2, updated_at = now() WHERE id = $1", [id, check.status]);
     await this.audit.record({ actorUserId, siteId: id, eventType: "SITE_RANKMATH_TESTED", message: "تم اختبار جسر رانك ماث", metadata: { status: check.status } });
     return { id, ...check };
+  }
+
+  /** Reads the languages Polylang has on the WordPress site; drops publish languages that no longer exist there. */
+  async syncLanguages(id: string, actorUserId?: string): Promise<{ id: string; status: string; message: string; languages: unknown[] }> {
+    const result = await this.db.query<InternalSiteCredentials & { site_status: string; language: string; publish_languages: unknown }>(
+      "SELECT id, wordpress_url, wordpress_username, wordpress_application_password_encrypted, status AS site_status, language, publish_languages FROM sites WHERE id = $1 AND status <> 'DELETED'",
+      [id]
+    );
+    if (!result.rowCount) throw new NotFoundException("الموقع غير موجود");
+    const site = result.rows[0]!;
+    assertSiteActive(site.site_status);
+    const check = await fetchPolylangLanguages(site);
+    const languages = normalizeSiteLanguages(check.languages);
+    const publishLanguages = check.status === "CONNECTED" ? sanitizeTargetLanguages(site.publish_languages, languages, site.language) : [];
+    await this.db.query(
+      "UPDATE sites SET polylang_status = $2, polylang_languages = $3::jsonb, publish_languages = $4::jsonb, updated_at = now() WHERE id = $1",
+      [id, check.status, JSON.stringify(check.status === "CONNECTED" ? languages : []), JSON.stringify(publishLanguages)]
+    );
+    await this.audit.record({ actorUserId, siteId: id, eventType: "SITE_LANGUAGES_SYNCED", message: "تمت مزامنة لغات Polylang", metadata: { status: check.status, languages: languages.map((language) => language.code) } });
+    return { id, status: check.status, message: check.message, languages: check.status === "CONNECTED" ? languages : [] };
   }
 
   async testGsc(id: string, actorUserId?: string): Promise<{ id: string; status: string; message: string }> {
@@ -379,6 +419,9 @@ function toPublicSite(row: SiteRow): Record<string, unknown> {
     status: row.status,
     wordpressStatus: row.wordpress_status,
     rankMathStatus: row.rank_math_status,
+    polylangStatus: row.polylang_status,
+    languages: normalizeSiteLanguages(row.polylang_languages),
+    publishLanguages: Array.isArray(row.publish_languages) ? row.publish_languages : [],
     gscStatus: row.gsc_status,
     contentCount: Number(row.content_count),
     publishedCount: Number(row.published_count),
@@ -424,6 +467,12 @@ class SitesController {
   @Roles("ADMIN")
   testRankMath(@Param("id") id: string, @Req() request: AuthenticatedRequest): Promise<{ id: string; status: string; message: string }> {
     return this.sites.testRankMath(id, request.user?.id);
+  }
+
+  @Post(":id/sync-languages")
+  @Roles("ADMIN")
+  syncLanguages(@Param("id") id: string, @Req() request: AuthenticatedRequest): Promise<{ id: string; status: string; message: string; languages: unknown[] }> {
+    return this.sites.syncLanguages(id, request.user?.id);
   }
 
   @Post(":id/test-gsc")

@@ -33,6 +33,7 @@ export const operationLabels: Record<ContentOperation, string> = {
 
 export const extraOperationLabels: Record<string, string> = {
   OPTIMIZE_LINKS: "تحسين الروابط الداخلية والـ CTA",
+  TRANSLATE_CONTENT: "ترجمة المقال",
   SYNC_GSC: "مزامنة بحث جوجل",
   LEGACY_IMPORT: "مستورد من النظام القديم"
 };

@@ -10,6 +10,8 @@ export interface WordPressSite {
 }
 
 export interface WordPressPostInput {
+  /** Polylang language slug; sent only for multilingual sites (the bridge plugin or Polylang Pro must be active). */
+  language?: string;
   wordpressPostId?: string | null;
   title: string;
   contentHtml: string;
@@ -45,8 +47,8 @@ export async function publishPost(site: WordPressSite, input: WordPressPostInput
   validatePost(input);
   const base = safeBaseUrl(site.wordpress_url);
   const auth = authHeader(site);
-  const categoryIds = input.category ? [await getOrCreateTerm(base, auth, "categories", input.category)] : [];
-  const tagIds = await Promise.all(input.tags.map((tag) => getOrCreateTerm(base, auth, "tags", tag)));
+  const categoryIds = input.category ? [await getOrCreateTerm(base, auth, "categories", input.category, input.language)] : [];
+  const tagIds = await Promise.all(input.tags.map((tag) => getOrCreateTerm(base, auth, "tags", tag, input.language)));
   // A previous attempt may have created the post before the database update was saved; adopt it
   // instead of creating a duplicate when the same slug and title already exist.
   const existingPostId = input.wordpressPostId ?? (await findExistingPostId(base, auth, input.slug, input.title));
@@ -66,6 +68,7 @@ export async function publishPost(site: WordPressSite, input: WordPressPostInput
       rank_math_focus_keyword: input.focusKeyword ?? ""
     }
   };
+  if (input.language) body.lang = input.language;
   if (statusAndDate.date) body.date = statusAndDate.date;
   if (categoryIds.length) body.categories = categoryIds;
   if (tagIds.length) body.tags = tagIds;
@@ -182,36 +185,89 @@ export async function searchWordPressInternalContent(site: WordPressSite, search
   return results.flat();
 }
 
-async function getOrCreateTerm(base: URL, auth: string, taxonomy: "categories" | "tags", name: string): Promise<number> {
+/** Writes Polylang's translation group (`{ ar: 12, en: 34 }`) on a post that is part of it. */
+export async function linkTranslations(site: WordPressSite, postId: string, translations: Record<string, number>): Promise<void> {
+  const base = safeBaseUrl(site.wordpress_url);
+  const response = await safeFetch(new URL(`/wp-json/wp/v2/posts/${postId}`, base), {
+    method: "POST",
+    headers: { Authorization: authHeader(site), "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ translations }),
+    signal: AbortSignal.timeout(30_000)
+  });
+  if (!response.ok) {
+    const data = (await response.json().catch(() => ({}))) as { message?: string };
+    throw new Error(data.message ?? `فشل ربط الترجمات برمز ${response.status}`);
+  }
+}
+
+/** Terms are per language in Polylang: a category/tag is reused only when it already exists in the post's language. */
+export function termInLanguage(term: { lang?: unknown }, language: string | undefined): boolean {
+  if (!language) return true;
+  // Sites without the bridge do not report a language on terms; then the name match alone decides.
+  return typeof term.lang !== "string" || term.lang.toLowerCase() === language.toLowerCase();
+}
+
+async function getOrCreateTerm(base: URL, auth: string, taxonomy: "categories" | "tags", name: string, language?: string): Promise<number> {
   const trimmed = name.trim();
   if (!trimmed) throw new Error("اسم التصنيف/الوسم فارغ.");
   const searchUrl = new URL(`/wp-json/wp/v2/${taxonomy}`, base);
   searchUrl.searchParams.set("search", trimmed);
   searchUrl.searchParams.set("per_page", "20");
+  if (language) searchUrl.searchParams.set("lang", language);
   const searchResponse = await safeFetch(searchUrl, {
     headers: { Authorization: auth, Accept: "application/json" },
     signal: AbortSignal.timeout(30_000)
   });
-  const found = (await searchResponse.json()) as Array<{ id: number; name: string }> | { message?: string };
+  const found = (await searchResponse.json()) as Array<{ id: number; name: string; lang?: unknown }> | { message?: string };
   if (!searchResponse.ok || !Array.isArray(found)) {
     throw new Error("فشل البحث عن التصنيف/الوسم في ووردبريس.");
   }
-  const exact = found.find((term) => term.name.trim().toLowerCase() === trimmed.toLowerCase());
+  const exact = found.find((term) => term.name.trim().toLowerCase() === trimmed.toLowerCase() && termInLanguage(term, language));
   if (exact) return exact.id;
 
-  const createUrl = new URL(`/wp-json/wp/v2/${taxonomy}`, base);
-  const createResponse = await safeFetch(createUrl, {
+  const created = await createTerm(base, auth, taxonomy, language ? { name: trimmed, lang: language } : { name: trimmed });
+  if (created.status === 400 && created.data.data?.term_id) {
+    const existingId = created.data.data.term_id;
+    if (!language || (await termHasLanguage(base, auth, taxonomy, existingId, language))) return existingId;
+    // The same name exists in another language: create this language's own term under a distinct slug.
+    const own = await createTerm(base, auth, taxonomy, { name: trimmed, lang: language, slug: `${termSlug(trimmed)}-${language}` });
+    if (own.ok && own.data.id) return own.data.id;
+    throw new Error(own.data.message ?? "فشل إنشاء التصنيف/الوسم بلغة المقال.");
+  }
+  if (!created.ok || !created.data.id) {
+    throw new Error(created.data.message ?? "فشل إنشاء التصنيف/الوسم في ووردبريس.");
+  }
+  return created.data.id;
+}
+
+interface CreatedTerm {
+  id?: number;
+  data?: { term_id?: number };
+  message?: string;
+}
+
+async function createTerm(base: URL, auth: string, taxonomy: "categories" | "tags", body: Record<string, string>): Promise<{ ok: boolean; status: number; data: CreatedTerm }> {
+  const response = await safeFetch(new URL(`/wp-json/wp/v2/${taxonomy}`, base), {
     method: "POST",
     headers: { Authorization: auth, "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ name: trimmed }),
+    body: JSON.stringify(body),
     signal: AbortSignal.timeout(30_000)
   });
-  const created = (await createResponse.json()) as { id?: number; data?: { term_id?: number }; message?: string };
-  if (createResponse.status === 400 && created.data?.term_id) return created.data.term_id;
-  if (!createResponse.ok || !created.id) {
-    throw new Error(created.message ?? "فشل إنشاء التصنيف/الوسم في ووردبريس.");
-  }
-  return created.id;
+  return { ok: response.ok, status: response.status, data: (await response.json().catch(() => ({}))) as CreatedTerm };
+}
+
+async function termHasLanguage(base: URL, auth: string, taxonomy: "categories" | "tags", id: number, language: string): Promise<boolean> {
+  const response = await safeFetch(new URL(`/wp-json/wp/v2/${taxonomy}/${id}`, base), {
+    headers: { Authorization: auth, Accept: "application/json" },
+    signal: AbortSignal.timeout(30_000)
+  });
+  if (!response.ok) return false;
+  const term = (await response.json().catch(() => ({}))) as { lang?: unknown };
+  return typeof term.lang === "string" && term.lang.toLowerCase() === language.toLowerCase();
+}
+
+function termSlug(value: string): string {
+  return value.normalize("NFKD").toLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu, "-").replace(/^-|-$/g, "").slice(0, 60) || "term";
 }
 
 function postStatus(input: WordPressPostInput): { status: "draft" | "future" | "publish"; date?: string } {

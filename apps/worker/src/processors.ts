@@ -3,14 +3,15 @@ import { generateText } from "./ai.js";
 import { imageCostUsd } from "./budget.js";
 import { forgetImage, recallImage, rememberImage } from "./image-cache.js";
 import { resolveChainForContent } from "./models.js";
-import { findModel, imageCostFromUsage, imageFailureCostFromUsage } from "@content-agent/shared";
+import { buildTranslationMap, findModel, findSiteLanguage, imageCostFromUsage, imageFailureCostFromUsage, normalizeSiteLanguages, sourceLanguageCode } from "@content-agent/shared";
 import { billFailedCall, releaseSpend, reserveSpend, settleSpend } from "./usage.js";
 import { sanitizeArticleHtml } from "./html-sanitizer.js";
 import { asStringArray, extractJson } from "./json.js";
 import { scoreArticle } from "./scoring.js";
 import { generateGeminiImage, ImageNotReturnedError } from "./gemini-image.js";
 import { fetchGscQueries, type GscSite } from "./google-search-console.js";
-import { publishPost, searchWordPressInternalContent, uploadMedia } from "./wordpress.js";
+import { linkTranslations, publishPost, searchWordPressInternalContent, uploadMedia } from "./wordpress.js";
+import { buildTranslationPrompt, missingLinks, parseTranslation } from "./translation.js";
 
 interface ContentRecord {
   id: string;
@@ -38,6 +39,11 @@ interface ContentRecord {
   site_status: string;
   market: string;
   language: string;
+  /** The article's own language code ("en" for a translation); null = the site language. */
+  content_language: string | null;
+  translation_of: string | null;
+  polylang_status: string;
+  polylang_languages: unknown;
   writing_standard: string | null;
   wordpress_url: string;
   wordpress_username: string;
@@ -75,6 +81,8 @@ export async function processContentOperation(contentItemId: string, operation: 
       return reviewDraft(contentItemId);
     case "OPTIMIZE_LINKS":
       return optimizeLinksAndCta(contentItemId);
+    case "TRANSLATE_CONTENT":
+      return translateContent(contentItemId);
     case "GENERATE_IMAGE":
       return generateFeaturedImage(contentItemId);
     case "PUBLISH":
@@ -111,7 +119,8 @@ export async function syncGscForSite(siteId: string): Promise<void> {
 
 async function fetchContent(id: string): Promise<ContentRecord> {
   const result = await query<ContentRecord>(
-    `SELECT c.*, s.name AS site_name, s.market, s.language, s.writing_standard, s.wordpress_url
+    `SELECT c.*, c.language AS content_language, s.name AS site_name, s.market, s.language, s.writing_standard, s.wordpress_url
+            , s.polylang_status, s.polylang_languages
             , s.wordpress_username, s.wordpress_application_password_encrypted, s.status AS site_status
      FROM content_items c
      JOIN sites s ON s.id = c.site_id
@@ -145,13 +154,16 @@ async function publishToWordPress(contentItemId: string): Promise<OperationResul
   const selected = item.selected_idea ?? {};
   const tags = asStringArray(item.tags);
   const focusKeyword = String(selected.targetKeyword ?? selected.target_keyword ?? item.target_keyword ?? "");
+  const site = {
+    wordpress_url: item.wordpress_url,
+    wordpress_username: item.wordpress_username,
+    wordpress_application_password_encrypted: item.wordpress_application_password_encrypted
+  };
+  const polylang = polylangLanguageFor(item);
   const result = await publishPost(
+    site,
     {
-      wordpress_url: item.wordpress_url,
-      wordpress_username: item.wordpress_username,
-      wordpress_application_password_encrypted: item.wordpress_application_password_encrypted
-    },
-    {
+      language: polylang,
       wordpressPostId: item.wordpress_post_id,
       title: item.title,
       contentHtml: item.draft_html,
@@ -183,9 +195,138 @@ async function publishToWordPress(contentItemId: string): Promise<OperationResul
   await appendAudit(contentItemId, "WORDPRESS_PUBLISH_SUCCEEDED", `تم إرسال المقال إلى ووردبريس بحالة ${result.status}`, {
     wordpressPostId: result.id,
     wordpressPostUrl: result.link,
-    wordpressStatus: result.status
+    wordpressStatus: result.status,
+    language: polylang
   });
+  if (polylang) await linkTranslationGroup(item, site, result.id);
   return { provider: "wordpress" };
+}
+
+/**
+ * The Polylang language to publish this article in, or undefined when the site is not multilingual
+ * (or the article's language is not one of the site's Polylang languages) and WordPress should apply its default.
+ */
+export function polylangLanguageFor(item: Pick<ContentRecord, "polylang_status" | "polylang_languages" | "content_language" | "language">): string | undefined {
+  if (item.polylang_status !== "CONNECTED") return undefined;
+  const languages = normalizeSiteLanguages(item.polylang_languages);
+  if (languages.length < 2) return undefined;
+  return findSiteLanguage(languages, sourceLanguageCode(item.content_language, item.language))?.code;
+}
+
+/**
+ * Links every already-published version of the article (source + translations) in Polylang. It runs after each
+ * publish, so the group grows as the translations go out and the order of publishing does not matter.
+ * A linking failure does not undo the publish: it is recorded and the next publish of the group retries it.
+ */
+async function linkTranslationGroup(item: ContentRecord, site: { wordpress_url: string; wordpress_username: string; wordpress_application_password_encrypted: string }, wordpressPostId: string): Promise<void> {
+  const rootId = item.translation_of ?? item.id;
+  const rows = await query<{ language: string | null; wordpress_post_id: string | null; site_language: string }>(
+    `SELECT COALESCE(c.language, s.language) AS language, c.wordpress_post_id, s.language AS site_language
+     FROM content_items c JOIN sites s ON s.id = c.site_id
+     WHERE (c.id = $1 OR c.translation_of = $1) AND c.wordpress_post_id IS NOT NULL`,
+    [rootId]
+  );
+  const languages = normalizeSiteLanguages(item.polylang_languages);
+  const map = buildTranslationMap(
+    rows.rows.map((row) => ({ language: findSiteLanguage(languages, row.language)?.code ?? null, wordpressPostId: row.wordpress_post_id }))
+  );
+  if (Object.keys(map).length < 2) return;
+  try {
+    await linkTranslations(site, wordpressPostId, map);
+    await appendAudit(item.id, "WORDPRESS_TRANSLATIONS_LINKED", "تم ربط ترجمات المقال في Polylang", { translations: map });
+  } catch (error) {
+    await appendAudit(item.id, "WORDPRESS_TRANSLATIONS_LINK_FAILED", "تم النشر لكن تعذر ربط الترجمات في Polylang", {
+      error: error instanceof Error ? error.message : String(error),
+      translations: map
+    });
+  }
+}
+
+async function translateContent(contentItemId: string): Promise<OperationResult> {
+  const item = await fetchContent(contentItemId);
+  if (!item.translation_of || !item.content_language) throw new Error("عنصر الترجمة غير مرتبط بمقال أصلي ولغة هدف.");
+  if (item.polylang_status !== "CONNECTED") throw new Error("الموقع غير متصل بـ Polylang. زامن لغات الموقع أولًا.");
+  const source = await fetchContent(item.translation_of);
+  if (!source.title || !source.draft_html) throw new Error("المقال الأصلي ليس له عنوان ومحتوى للترجمة.");
+  const languages = normalizeSiteLanguages(item.polylang_languages);
+  const target = findSiteLanguage(languages, item.content_language);
+  if (!target) throw new Error(`اللغة ${item.content_language} غير موجودة في لغات الموقع.`);
+  const sourceLanguage = findSiteLanguage(languages, sourceLanguageCode(source.content_language, source.language));
+
+  const sourceArticle = {
+    title: source.title,
+    metaDescription: source.meta_description ?? "",
+    contentHtml: source.draft_html,
+    targetKeyword: source.target_keyword ?? "",
+    category: source.category ?? "",
+    tags: asStringArray(source.tags),
+    imageAlt: source.image_alt ?? ""
+  };
+  const prompt = buildTranslationPrompt({
+    ...sourceArticle,
+    sourceLanguage: sourceLanguage ? `${sourceLanguage.name} (${sourceLanguage.code})` : languageName(source.language),
+    targetLanguage: `${target.name} (${target.code})`,
+    siteName: source.site_name,
+    market: source.market
+  });
+  const result = await generateText({ contentItemId, operation: "TRANSLATE_CONTENT", prompt, maxTokens: 8000 });
+  const article = parseTranslation(result.text, sourceArticle);
+  const lostLinks = missingLinks(source.draft_html, article.contentHtml);
+  const score = scoreArticle({
+    html: article.contentHtml,
+    title: article.title,
+    metaDescription: article.metaDescription,
+    targetKeyword: article.targetKeyword || undefined,
+    imageAlt: article.imageAlt,
+    siteUrl: source.wordpress_url
+  });
+  await query(
+    `UPDATE content_items
+     SET title = $2,
+         topic = $3,
+         target_keyword = $4,
+         meta_description = $5,
+         draft_html = $6,
+         category = $7,
+         tags = $8::jsonb,
+         image_alt = $9,
+         image_prompt = $10,
+         image_url = $11,
+         wordpress_media_id = $12,
+         content_score = $13,
+         content_score_details = $14::jsonb,
+         status = 'IMAGE_READY',
+         last_successful_state = 'IMAGE_READY',
+         failed_action = NULL,
+         error_message = NULL,
+         updated_at = now()
+     WHERE id = $1`,
+    [
+      contentItemId,
+      article.title,
+      source.topic,
+      article.targetKeyword || null,
+      article.metaDescription,
+      article.contentHtml,
+      article.category || source.category,
+      JSON.stringify(article.tags.length > 0 ? article.tags : asStringArray(source.tags)),
+      article.imageAlt || source.image_alt,
+      source.image_prompt,
+      source.image_url,
+      source.wordpress_media_id,
+      score.score,
+      JSON.stringify(score.checks)
+    ]
+  );
+  await appendAudit(contentItemId, "AI_TRANSLATION_READY", `تمت ترجمة المقال إلى ${target.name} بواسطة ${result.provider}`, {
+    provider: result.provider,
+    model: result.model,
+    language: target.code,
+    score: score.score,
+    sourceContentItemId: source.id,
+    missingLinks: lostLinks
+  });
+  return { provider: result.provider };
 }
 
 async function generateImageWithChain(contentItemId: string, prompt: string): Promise<Awaited<ReturnType<typeof generateGeminiImage>> & { model: string }> {
@@ -899,7 +1040,7 @@ function slugFromKeyword(value: string): string {
     .normalize("NFKD")
     .toLowerCase()
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9\u0600-\u06FF]+/g, "-")
+    .replace(/[^\p{L}\p{M}\p{N}]+/gu, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 75)
