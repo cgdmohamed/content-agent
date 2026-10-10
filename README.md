@@ -114,6 +114,16 @@ Never copy hardcoded legacy secrets into source code.
 
 Use WordPress Application Passwords for REST authentication. Rank Math metadata requires the bridge snippet from the plugin in `wordpress/content-agent-rankmath-bridge/` (also packaged as `wordpress/content-agent-rankmath-bridge.zip`); the Sites page exposes a bridge test so Admins can distinguish `Connected`, `Bridge Missing`, and `Permission Error`.
 
+### Page index and internal links
+
+Articles link only to real pages of the site. The worker reads every public post, page and custom type (services, products...) through the WordPress REST API into a per-site index, once a day or on demand (**Sites -> Pages -> Sync pages**).
+
+- Each page is classified by rules (WordPress type, slug, title): service, product/package, article, about, contact or other; privacy/terms/checkout-style pages are hidden. Admins can change the kind, star a page as **priority** or hide it; those choices survive every sync.
+- When an article is written, reviewed or its links are rebuilt, the writer is offered the pages most relevant to the topic plus a few priority pages (services), with their type. On multilingual sites only pages of the article's language are offered. A site that was never synced falls back to searching WordPress live.
+- A link not in that list (homepage, search, invented URL) is turned back into plain text, each page is linked at most once and at most two service/product pages per article.
+- At publish time, links to pages the last sync found deleted are replaced by their text in the published copy (recorded in the article activity).
+- With the Polylang bridge, pages and custom types report their language, so the index is per language.
+
 ### Publishing in several languages (Polylang)
 
 A site that uses [Polylang](https://wordpress.org/plugins/polylang/) can publish the same article in every language it has.

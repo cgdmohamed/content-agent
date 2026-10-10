@@ -231,6 +231,7 @@ export function Sites(): ReactElement {
                 <Link className="rounded-md px-3 py-1.5 text-sm font-medium text-teal hover:bg-teal/10" to="/content">المحتوى</Link>
                 {isAdmin ? <Link className="rounded-md px-3 py-1.5 text-sm font-medium text-teal hover:bg-teal/10" to={`/usage?site=${site.id}`}>الاستهلاك</Link> : null}
                 {isAdmin ? <Link className="rounded-md px-3 py-1.5 text-sm font-medium text-teal hover:bg-teal/10" to={`/sites/${site.id}/report`}>التقرير</Link> : null}
+                <Link className="rounded-md px-3 py-1.5 text-sm font-medium text-teal hover:bg-teal/10" to={`/sites/${site.id}/pages`}>الصفحات</Link>
               </div>
               {isAdmin ? (
                 <div className="flex items-center gap-1">

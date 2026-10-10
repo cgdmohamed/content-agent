@@ -11,6 +11,7 @@ import { scoreArticle } from "./scoring.js";
 import { generateGeminiImage, ImageNotReturnedError } from "./gemini-image.js";
 import { fetchGscQueries, type GscSite } from "./google-search-console.js";
 import { linkTranslations, publishPost, searchWordPressInternalContent, uploadMedia } from "./wordpress.js";
+import { limitRepeatedLinks, normalizeLinkKey, rankPageCandidates, type PageKind } from "./site-pages-rules.js";
 import { buildTranslationPrompt, missingLinks, parseTranslation } from "./translation.js";
 
 interface ContentRecord {
@@ -49,6 +50,7 @@ interface ContentRecord {
   wordpress_username: string;
   wordpress_application_password_encrypted: string;
   wordpress_post_id: string | null;
+  wordpress_post_url: string | null;
   scheduled_publish_at: Date | null;
   auto_publish: boolean;
   approved_at: Date | null;
@@ -58,6 +60,9 @@ interface InternalLinkCandidate {
   title: string;
   url: string;
   keyword: string | null;
+  /** SERVICE, PRODUCT, ARTICLE, ABOUT, CONTACT or OTHER (from the site's page index). */
+  type?: PageKind;
+  summary?: string;
 }
 
 export interface OperationResult {
@@ -160,13 +165,17 @@ async function publishToWordPress(contentItemId: string): Promise<OperationResul
     wordpress_application_password_encrypted: item.wordpress_application_password_encrypted
   };
   const polylang = polylangLanguageFor(item);
+  const { html: contentHtml, removed } = await removeLinksToGonePages(item.site_id, item.draft_html);
+  if (removed.length > 0) {
+    await appendAudit(contentItemId, "INTERNAL_LINKS_REMOVED", "أُزيلت روابط داخلية لصفحات لم تعد موجودة قبل النشر", { removed });
+  }
   const result = await publishPost(
     site,
     {
       language: polylang,
       wordpressPostId: item.wordpress_post_id,
       title: item.title,
-      contentHtml: item.draft_html,
+      contentHtml,
       metaDescription: item.meta_description,
       focusKeyword,
       slug: slugFromKeyword(focusKeyword || item.title || item.topic),
@@ -200,6 +209,23 @@ async function publishToWordPress(contentItemId: string): Promise<OperationResul
   });
   if (polylang) await linkTranslationGroup(item, site, result.id);
   return { provider: "wordpress" };
+}
+
+/**
+ * Links to pages that the last sync found deleted from WordPress would be dead ends: they are replaced by their
+ * anchor text in the published copy (the saved draft is left as the editor wrote it). Unknown URLs are kept.
+ */
+export async function removeLinksToGonePages(siteId: string, html: string): Promise<{ html: string; removed: string[] }> {
+  const gone = await query<{ url: string }>("SELECT url FROM site_pages WHERE site_id = $1 AND gone = true", [siteId]);
+  if (gone.rowCount === 0) return { html, removed: [] };
+  const goneKeys = new Set(gone.rows.map((row) => normalizeLinkKey(row.url)));
+  const removed: string[] = [];
+  const next = html.replace(/<a\b[^>]*\bhref=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (full, href: string, label: string) => {
+    if (!goneKeys.has(normalizeLinkKey(href))) return full;
+    removed.push(href);
+    return label;
+  });
+  return { html: next, removed };
 }
 
 /**
@@ -518,6 +544,7 @@ async function writeDraft(contentItemId: string): Promise<OperationResult> {
     `الموجز التحريري: ${JSON.stringify(item.editorial_brief)}`,
     `المصادر: ${JSON.stringify(item.sources)}`,
     `روابط داخلية مرشحة من نفس الموقع: ${JSON.stringify(internalLinks)}`,
+    linkUsageInstruction,
     "متطلبات صارمة:",
     `- التزم بلغة الموقع فقط: ${languageName(item.language)}. لا تكتب بالعربية إذا كانت اللغة English.`,
     "- لا يقل المقال عن 1200 كلمة عربية مفيدة، وإن كان الموضوع تنافسيًا اجعله أقرب إلى 1600 كلمة.",
@@ -580,6 +607,7 @@ async function reviewDraft(contentItemId: string): Promise<OperationResult> {
     "راجع المقال التالي وحسنه دون فقدان الروابط أو المعنى.",
     `رابط الموقع الأساسي للروابط الداخلية: ${item.wordpress_url}`,
     `روابط داخلية مرشحة من نفس الموقع: ${JSON.stringify(internalLinks)}`,
+    linkUsageInstruction,
     "ركز على نية البحث، الوضوح، إزالة التكرار، تحسين العناوين، الوصف التعريفي، والأسئلة الشائعة.",
     `ارفع جودة المقال إلى معيار SEO/AEO/GEO: إجابة مباشرة، عمق كاف، قسم أسئلة شائعة، وروابط داخلية من قائمة الروابط المرشحة عندما تناسب السياق. ${closingInstruction}`,
     "ممنوع اختراع أي URL داخلي غير موجود في قائمة الروابط المرشحة. احذف الرابط الداخلي غير الموثق بدل استبداله بمسار عشوائي.",
@@ -639,6 +667,7 @@ async function optimizeLinksAndCta(contentItemId: string): Promise<OperationResu
     `رابط الموقع الأساسي: ${item.wordpress_url}`,
     `الكلمة المستهدفة: ${item.target_keyword ?? item.topic}`,
     `روابط داخلية مرشحة من نفس الموقع: ${JSON.stringify(internalLinks)}`,
+    linkUsageInstruction,
     "المطلوب:",
     "- أضف رابطًا داخليًا (حتى رابطين) من قائمة الروابط المرشحة فقط، داخل فقرة يخدمها الرابط فعلًا وبـ anchor طبيعي يخدم نية البحث. إن لم يوجد رابط مناسب فلا تضف شيئًا.",
     "- ممنوع اختراع أي URL داخلي غير موجود في قائمة الروابط المرشحة، وممنوع الربط بالصفحة الرئيسية أو بصفحة بحث.",
@@ -786,7 +815,29 @@ export function linkSearchTerms(item: Pick<ContentRecord, "target_keyword" | "to
     .slice(0, 3);
 }
 
+const maxLinkCandidates = 12;
+
+/**
+ * Pages the writer may link to. The site's page index (services, products, articles...) is the main source:
+ * ranked by relevance to the article, plus a few priority pages. Articles written by this system that are not in
+ * the index yet are added; a site that was never synced falls back to searching WordPress live.
+ */
 async function fetchInternalLinkCandidates(item: ContentRecord): Promise<InternalLinkCandidate[]> {
+  const language = polylangLanguageFor(item) ?? null;
+  const indexed = await query<{ title: string; url: string; slug: string; summary: string; kind: PageKind; priority: boolean }>(
+    `SELECT title, url, slug, summary, kind, priority
+     FROM site_pages
+     WHERE site_id = $1 AND gone = false AND hidden = false
+       AND ($2::text IS NULL OR language IS NULL OR language = $2)`,
+    [item.site_id, language]
+  );
+  const articleText = [item.target_keyword, item.topic, item.title].filter(Boolean).join(" ");
+  const ownUrl = item.wordpress_post_url ? normalizeLinkKey(item.wordpress_post_url) : null;
+  const fromIndex: InternalLinkCandidate[] = rankPageCandidates(
+    articleText,
+    indexed.rows.filter((row) => normalizeLinkKey(row.url) !== ownUrl)
+  ).map((row) => ({ title: row.title, url: row.url, keyword: null, type: row.kind, summary: row.summary }));
+
   const result = await query<{ title: string | null; topic: string; target_keyword: string | null; wordpress_post_url: string | null }>(
     `SELECT title, topic, target_keyword, wordpress_post_url
      FROM content_items
@@ -802,33 +853,40 @@ async function fetchInternalLinkCandidates(item: ContentRecord): Promise<Interna
      LIMIT 8`,
     [item.site_id, item.id, item.topic, item.content_language]
   );
-  const savedLinks = result.rows
+  const savedLinks: InternalLinkCandidate[] = result.rows
     .map((row) => ({
       title: String(row.title ?? row.topic).trim(),
       url: String(row.wordpress_post_url ?? "").trim(),
-      keyword: row.target_keyword?.trim() || null
+      keyword: row.target_keyword?.trim() || null,
+      type: "ARTICLE" as const
     }))
     .filter((row) => row.title && isInternalUrl(row.url, item.wordpress_url));
 
   const wordpressLinks: InternalLinkCandidate[] = [];
-  const site = {
-    wordpress_url: item.wordpress_url,
-    wordpress_username: item.wordpress_username,
-    wordpress_application_password_encrypted: item.wordpress_application_password_encrypted
-  };
-  for (const term of linkSearchTerms(item)) {
-    try {
-      const found = await searchWordPressInternalContent(site, term, polylangLanguageFor(item));
-      for (const row of found) {
-        if (row.title && isInternalUrl(row.url, item.wordpress_url)) wordpressLinks.push({ title: row.title, url: row.url, keyword: row.subtype === "page" ? "page" : null });
+  if (indexed.rows.length === 0) {
+    const site = {
+      wordpress_url: item.wordpress_url,
+      wordpress_username: item.wordpress_username,
+      wordpress_application_password_encrypted: item.wordpress_application_password_encrypted
+    };
+    for (const term of linkSearchTerms(item)) {
+      try {
+        const found = await searchWordPressInternalContent(site, term, polylangLanguageFor(item));
+        for (const row of found) {
+          if (row.title && isInternalUrl(row.url, item.wordpress_url)) wordpressLinks.push({ title: row.title, url: row.url, keyword: null, type: row.subtype === "page" ? "OTHER" : "ARTICLE" });
+        }
+      } catch {
+        // A failed search only means fewer candidates; the article is still written.
       }
-    } catch {
-      // A failed search only means fewer candidates; the article is still written.
     }
   }
 
-  return uniqueInternalLinks([...savedLinks, ...wordpressLinks], item.wordpress_url).slice(0, 12);
+  return uniqueInternalLinks([...fromIndex, ...savedLinks, ...wordpressLinks], item.wordpress_url).slice(0, maxLinkCandidates + 3);
 }
+
+/** How the writer should use the candidate list; shared by writing, review and the links step. */
+export const linkUsageInstruction =
+  "كل رابط مرشح له type: SERVICE/PRODUCT = صفحة خدمة أو منتج للموقع، ARTICLE = مقال، غير ذلك صفحة عامة. اربط صفحة خدمة أو منتج فقط حيث يذكر المقال هذه الخدمة طبيعيًا، وبحد أقصى رابطين لصفحات الخدمات/المنتجات، ولا تكرر الرابط نفسه، ولا تدرج روابط لمجرد استكمال عدد.";
 
 /**
  * Cleans what the model wrote without adding anything: form-like text is removed and internal links are kept only
@@ -836,7 +894,10 @@ async function fetchInternalLinkCandidates(item: ContentRecord): Promise<Interna
  * made of the homepage and a search URL reads as filler and links nowhere useful.
  */
 function enforceArticleRequirements(html: string, item: ContentRecord, internalLinks: InternalLinkCandidate[] = []): string {
-  return sanitizeArticleHtml(constrainInternalLinks(removeFormLikeCopy(html), item, internalLinks));
+  const constrained = constrainInternalLinks(removeFormLikeCopy(html), item, internalLinks);
+  const kinds = new Map<string, PageKind>();
+  for (const link of internalLinks) kinds.set(normalizeLinkKey(link.url), link.type ?? "ARTICLE");
+  return sanitizeArticleHtml(limitRepeatedLinks(constrained, kinds));
 }
 
 function uniqueInternalLinks(links: InternalLinkCandidate[], siteUrl: string): InternalLinkCandidate[] {

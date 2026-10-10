@@ -355,6 +355,51 @@ describe.skipIf(!enabled)("API over HTTP with real PostgreSQL and Redis", () => 
     }
   });
 
+  it("lists the site page index, lets an admin correct it and queues a sync", async () => {
+    const site = await api("/sites", {
+      method: "POST",
+      cookie: adminCookie,
+      body: { name: "موقع الصفحات", wordpressUrl: "https://203.0.113.30", wordpressUsername: "editor", wordpressApplicationPassword: "app-password", market: "SA", language: "ar" }
+    });
+    const siteId = String(site.body.id);
+    const db = new Client({ connectionString: process.env.DATABASE_URL });
+    await db.connect();
+    try {
+      await db.query(
+        `INSERT INTO site_pages (site_id, wp_type, wp_id, url, title, kind, priority, hidden, gone) VALUES
+         ($1, 'service', '1', 'https://203.0.113.30/seo/', 'خدمة السيو', 'SERVICE', true, false, false),
+         ($1, 'post', '2', 'https://203.0.113.30/blog/a/', 'مقال عن المحتوى', 'ARTICLE', false, false, false),
+         ($1, 'page', '3', 'https://203.0.113.30/privacy/', 'سياسة الخصوصية', 'OTHER', false, true, false),
+         ($1, 'page', '4', 'https://203.0.113.30/old/', 'صفحة قديمة', 'OTHER', false, false, true)`,
+        [siteId]
+      );
+      const all = await api(`/sites/${siteId}/pages`, { cookie: adminCookie });
+      expect(all.status).toBe(200);
+      expect(all.body).toMatchObject({ total: 3, hidden: 1, byKind: { SERVICE: 1, ARTICLE: 1, OTHER: 1 } }); // the deleted page is not counted
+      expect((all.body.items as Array<{ title: string }>)[0]!.title).toBe("خدمة السيو"); // priority first
+      expect(((await api(`/sites/${siteId}/pages?kind=ARTICLE`, { cookie: adminCookie })).body.items as unknown[]).length).toBe(1);
+      expect(((await api(`/sites/${siteId}/pages?search=${encodeURIComponent("الخصوصية")}`, { cookie: adminCookie })).body.items as unknown[]).length).toBe(1);
+
+      const privacy = (all.body.items as Array<{ id: string; title: string }>).find((row) => row.title === "سياسة الخصوصية")!;
+      expect((await api(`/sites/${siteId}/pages/${privacy.id}`, { method: "PATCH", cookie: adminCookie, body: { hidden: false, kind: "ABOUT" } })).status).toBe(200);
+      const row = await db.query("SELECT kind, hidden, kind_source FROM site_pages WHERE id = $1", [privacy.id]);
+      expect(row.rows[0]).toEqual({ kind: "ABOUT", hidden: false, kind_source: "MANUAL" });
+      expect((await api(`/sites/${siteId}/pages/${privacy.id}`, { method: "PATCH", cookie: adminCookie, body: { kind: "NOPE" } })).status).toBe(400);
+      expect((await api(`/sites/${siteId}/pages/00000000-0000-4000-8000-000000000000`, { method: "PATCH", cookie: adminCookie, body: { hidden: true } })).status).toBe(404);
+
+      const queued = await api(`/sites/${siteId}/sync-pages`, { method: "POST", cookie: adminCookie });
+      expect(queued.status).toBe(201);
+      const queue = new Queue("maintenance", { connection: redis });
+      const job = await queue.getJob(String(queued.body.jobId));
+      expect(job?.name).toBe("SYNC_PAGES");
+      expect(job?.data).toMatchObject({ siteId });
+      await queue.close();
+      expect((await api(`/sites/${siteId}/sync-pages`, { method: "POST", cookie: adminCookie })).body.jobId).toBe(queued.body.jobId); // not queued twice
+    } finally {
+      await db.end();
+    }
+  });
+
   it("backfills site attribution for usage rows written before migration 010", async () => {
     const db = new Client({ connectionString: process.env.DATABASE_URL });
     await db.connect();

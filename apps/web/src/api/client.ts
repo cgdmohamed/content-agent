@@ -92,6 +92,30 @@ export interface TranslationItemDto {
   isSource: boolean;
 }
 
+export type PageKindKey = "SERVICE" | "PRODUCT" | "ARTICLE" | "ABOUT" | "CONTACT" | "OTHER";
+
+export interface SitePageDto {
+  id: string;
+  type: string;
+  title: string;
+  url: string;
+  kind: PageKindKey;
+  priority: boolean;
+  hidden: boolean;
+  /** An admin changed the kind/priority/visibility, so a sync no longer overwrites them. */
+  manual: boolean;
+  language: string | null;
+  summary: string;
+}
+
+export interface SitePagesDto {
+  syncedAt: string | null;
+  total: number;
+  hidden: number;
+  byKind: Partial<Record<PageKindKey, number>>;
+  items: SitePageDto[];
+}
+
 export interface SiteDto {
   id: string;
   name: string;
@@ -112,6 +136,7 @@ export interface SiteDto {
   languages: SiteLanguageDto[];
   /** Languages every approved article is also translated and published in. */
   publishLanguages: string[];
+  pagesSyncedAt: string | null;
   contentCount: number;
   publishedCount: number;
 }
@@ -587,6 +612,15 @@ export const api = {
   testRankMath: (id: string) => request<{ id: string; status: IntegrationStatus; message: string }>(`/sites/${id}/test-rankmath`, { method: "POST" }),
   testGsc: (id: string) => request<{ id: string; status: IntegrationStatus; message: string }>(`/sites/${id}/test-gsc`, { method: "POST" }),
   syncLanguages: (id: string) => request<{ id: string; status: IntegrationStatus; message: string; languages: SiteLanguageDto[] }>(`/sites/${id}/sync-languages`, { method: "POST" }),
+  sitePages: (id: string, params: { kind?: string; search?: string } = {}) => {
+    const query = new URLSearchParams();
+    if (params.kind) query.set("kind", params.kind);
+    if (params.search) query.set("search", params.search);
+    return request<SitePagesDto>(`/sites/${id}/pages${query.size ? `?${query}` : ""}`);
+  },
+  updateSitePage: (id: string, pageId: string, body: { kind?: PageKindKey; priority?: boolean; hidden?: boolean }) =>
+    request<{ ok: true }>(`/sites/${id}/pages/${pageId}`, { method: "PATCH", body: JSON.stringify(body) }),
+  syncSitePages: (id: string) => request<{ statusCode: 202; jobId: string; siteId: string }>(`/sites/${id}/sync-pages`, { method: "POST" }),
   syncGsc: (id: string) => request<{ statusCode: 202; jobId: string; siteId: string }>(`/sites/${id}/sync-gsc`, { method: "POST" }),
   jobs: () => request<JobsDto>("/jobs"),
   retryJob: (id: string) => request<{ statusCode: 202; jobId: string }>(`/jobs/${id}/retry`, { method: "POST" }),

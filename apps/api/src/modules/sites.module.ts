@@ -1,6 +1,6 @@
-import { BadRequestException, Body, Controller, Delete, Get, Injectable, Module, NotFoundException, Param, Patch, Post, Req } from "@nestjs/common";
-import { normalizeSiteLanguages, sanitizeAllowedModels, sanitizeOperationModels, sanitizeTargetLanguages, type OperationModels } from "@content-agent/shared";
-import { ArrayMaxSize, IsArray, IsIn, IsObject, IsOptional, IsString, IsUrl, MaxLength } from "class-validator";
+import { BadRequestException, Body, Controller, Delete, Get, Injectable, Module, NotFoundException, Param, Patch, Post, Query, Req } from "@nestjs/common";
+import { isPageKind, normalizeSiteLanguages, sanitizeAllowedModels, sanitizeOperationModels, sanitizeTargetLanguages, type OperationModels } from "@content-agent/shared";
+import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsObject, IsOptional, IsString, IsUrl, MaxLength } from "class-validator";
 import { AuditService } from "../audit/audit.module.js";
 import { DatabaseService } from "../database/database.module.js";
 import { JobQueueService } from "../queue/job-queue.module.js";
@@ -57,6 +57,20 @@ class CreateSiteDto {
   @IsOptional()
   @IsIn(["ACTIVE", "DISABLED"])
   status?: "ACTIVE" | "DISABLED";
+}
+
+class UpdateSitePageDto {
+  @IsOptional()
+  @IsIn(["SERVICE", "PRODUCT", "ARTICLE", "ABOUT", "CONTACT", "OTHER"])
+  kind?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  priority?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  hidden?: boolean;
 }
 
 class UpdateSiteDto {
@@ -148,6 +162,7 @@ interface SiteRow {
   polylang_status: string;
   polylang_languages: unknown;
   publish_languages: unknown;
+  pages_synced_at: Date | null;
   content_count: string;
   published_count: string;
   created_at: Date;
@@ -165,7 +180,7 @@ class SitesService {
   async list(): Promise<Array<Record<string, unknown>>> {
     const result = await this.db.query<SiteRow>(
       `SELECT s.id, s.name, s.wordpress_url, s.wordpress_username, s.market, s.language, s.writing_standard,
-              s.wordpress_status, s.rank_math_status, s.gsc_status, s.status, s.gsc_property, s.allowed_models, s.operation_models, s.polylang_status, s.polylang_languages, s.publish_languages, s.created_at, s.updated_at,
+              s.wordpress_status, s.rank_math_status, s.gsc_status, s.status, s.gsc_property, s.allowed_models, s.operation_models, s.polylang_status, s.polylang_languages, s.publish_languages, s.pages_synced_at, s.created_at, s.updated_at,
               COUNT(c.id)::text AS content_count,
               COUNT(c.id) FILTER (WHERE c.status = 'PUBLISHED')::text AS published_count
        FROM sites s
@@ -184,7 +199,7 @@ class SitesService {
       `INSERT INTO sites (name, wordpress_url, wordpress_username, wordpress_application_password_encrypted, market, language, writing_standard)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING id, name, wordpress_url, wordpress_username, market, language, writing_standard,
-                 wordpress_status, rank_math_status, gsc_status, status, gsc_property, allowed_models, operation_models, polylang_status, polylang_languages, publish_languages, '0'::text AS content_count, '0'::text AS published_count, created_at, updated_at`,
+                 wordpress_status, rank_math_status, gsc_status, status, gsc_property, allowed_models, operation_models, polylang_status, polylang_languages, publish_languages, pages_synced_at, '0'::text AS content_count, '0'::text AS published_count, created_at, updated_at`,
       [
         body.name,
         wordpressUrl,
@@ -206,7 +221,7 @@ class SitesService {
       await this.update(String(result.rows[0]!.id), { gscProperty: body.gscProperty, gscServiceAccountJson: body.gscServiceAccountJson }, actorUserId);
       const updated = await this.db.query<SiteRow>(
         `SELECT id, name, wordpress_url, wordpress_username, market, language, writing_standard,
-                wordpress_status, rank_math_status, gsc_status, status, gsc_property, allowed_models, operation_models, polylang_status, polylang_languages, publish_languages, '0'::text AS content_count, '0'::text AS published_count, created_at, updated_at
+                wordpress_status, rank_math_status, gsc_status, status, gsc_property, allowed_models, operation_models, polylang_status, polylang_languages, publish_languages, pages_synced_at, '0'::text AS content_count, '0'::text AS published_count, created_at, updated_at
          FROM sites WHERE id = $1`,
         [result.rows[0]!.id]
       );
@@ -250,7 +265,7 @@ class SitesService {
          updated_at = now()
        WHERE id = $1
        RETURNING id, name, wordpress_url, wordpress_username, market, language, writing_standard,
-                 wordpress_status, rank_math_status, gsc_status, status, gsc_property, allowed_models, operation_models, polylang_status, polylang_languages, publish_languages, '0'::text AS content_count, '0'::text AS published_count, created_at, updated_at`,
+                 wordpress_status, rank_math_status, gsc_status, status, gsc_property, allowed_models, operation_models, polylang_status, polylang_languages, publish_languages, pages_synced_at, '0'::text AS content_count, '0'::text AS published_count, created_at, updated_at`,
       [
         id,
         body.name ?? null,
@@ -327,6 +342,89 @@ class SitesService {
     return { id, status: check.status, message: check.message, languages: check.status === "CONNECTED" ? languages : [] };
   }
 
+  /** The site's page index (what articles may link to), with how many pages each kind has. */
+  async listPages(id: string, filters: { kind?: string; search?: string; hidden?: string }): Promise<Record<string, unknown>> {
+    const site = await this.db.query<{ pages_synced_at: Date | null }>("SELECT pages_synced_at FROM sites WHERE id = $1 AND status <> 'DELETED'", [id]);
+    if (!site.rowCount) throw new NotFoundException("الموقع غير موجود");
+    const where = ["site_id = $1", "gone = false"];
+    const values: unknown[] = [id];
+    if (filters.kind && isPageKind(filters.kind)) {
+      values.push(filters.kind);
+      where.push(`kind = $${values.length}`);
+    }
+    if (filters.hidden === "true") where.push("hidden = true");
+    if (filters.hidden === "false") where.push("hidden = false");
+    if (filters.search?.trim()) {
+      values.push(`%${filters.search.trim().slice(0, 80)}%`);
+      where.push(`(title ILIKE $${values.length} OR url ILIKE $${values.length})`);
+    }
+    const [rows, counts] = await Promise.all([
+      this.db.query(
+        `SELECT id, wp_type, title, url, kind, kind_source, priority, hidden, language, summary, synced_at
+         FROM site_pages WHERE ${where.join(" AND ")}
+         ORDER BY priority DESC, kind, title LIMIT 500`,
+        values
+      ),
+      this.db.query<{ kind: string; hidden: boolean; count: string }>("SELECT kind, hidden, COUNT(*)::text AS count FROM site_pages WHERE site_id = $1 AND gone = false GROUP BY kind, hidden", [id])
+    ]);
+    const byKind: Record<string, number> = {};
+    let hidden = 0;
+    for (const row of counts.rows) {
+      byKind[row.kind] = (byKind[row.kind] ?? 0) + Number(row.count);
+      if (row.hidden) hidden += Number(row.count);
+    }
+    return {
+      syncedAt: site.rows[0]!.pages_synced_at,
+      total: Object.values(byKind).reduce((sum, value) => sum + value, 0),
+      byKind,
+      hidden,
+      items: rows.rows.map((row) => ({
+        id: row.id,
+        type: row.wp_type,
+        title: row.title,
+        url: row.url,
+        kind: row.kind,
+        priority: row.priority,
+        hidden: row.hidden,
+        manual: row.kind_source === "MANUAL",
+        language: row.language,
+        summary: row.summary,
+        syncedAt: row.synced_at
+      }))
+    };
+  }
+
+  async updatePage(id: string, pageId: string, body: UpdateSitePageDto, actorUserId?: string): Promise<{ ok: true }> {
+    if (body.kind !== undefined && !isPageKind(body.kind)) throw new BadRequestException("نوع الصفحة غير صالح.");
+    const result = await this.db.query(
+      `UPDATE site_pages
+       SET kind = COALESCE($3, kind), priority = COALESCE($4, priority), hidden = COALESCE($5, hidden), kind_source = 'MANUAL'
+       WHERE id = $2 AND site_id = $1`,
+      [id, pageId, body.kind ?? null, body.priority ?? null, body.hidden ?? null]
+    );
+    if (!result.rowCount) throw new NotFoundException("الصفحة غير موجودة");
+    await this.audit.record({ actorUserId, siteId: id, eventType: "SITE_PAGE_UPDATED", message: "تم تعديل صفحة في فهرس الموقع", metadata: { pageId, ...body } });
+    return { ok: true };
+  }
+
+  async syncPages(id: string, actorUserId?: string): Promise<{ statusCode: 202; jobId: string; siteId: string }> {
+    const site = await this.db.query<{ site_status: string }>("SELECT status AS site_status FROM sites WHERE id = $1 AND status <> 'DELETED'", [id]);
+    if (!site.rowCount) throw new NotFoundException("الموقع غير موجود");
+    assertSiteActive(site.rows[0]!.site_status);
+    const inFlight = await this.db.query<{ bull_job_id: string }>(
+      `SELECT bull_job_id FROM job_runs
+       WHERE operation = 'SYNC_PAGES' AND bull_job_id LIKE $1 AND status IN ('WAITING', 'ACTIVE', 'DELAYED') AND bull_job_id IS NOT NULL
+       ORDER BY created_at DESC LIMIT 1`,
+      [`SYNC_PAGES-${id}-%`]
+    );
+    if (inFlight.rowCount) return { statusCode: 202, jobId: inFlight.rows[0]!.bull_job_id, siteId: id };
+    const jobId = buildJobId("SYNC_PAGES", id);
+    await this.queue.enqueue("maintenance", "SYNC_PAGES", { siteId: id, operation: "SYNC_PAGES" }, jobId);
+    await this.db.query("INSERT INTO job_runs (operation, queue_name, bull_job_id, status) VALUES ('SYNC_PAGES', 'maintenance', $1, 'WAITING') ON CONFLICT DO NOTHING", [jobId]);
+    await this.audit.record({ actorUserId, siteId: id, eventType: "SITE_PAGES_SYNC_ENQUEUED", message: "تمت إضافة مزامنة صفحات الموقع إلى الطابور", metadata: { jobId } });
+    return { statusCode: 202, jobId, siteId: id };
+  }
+
   async testGsc(id: string, actorUserId?: string): Promise<{ id: string; status: string; message: string }> {
     const result = await this.db.query<GscSiteCredentials & { site_status: string }>(
       "SELECT id, gsc_property, gsc_service_account_encrypted, status AS site_status FROM sites WHERE id = $1 AND status <> 'DELETED'",
@@ -359,7 +457,7 @@ class SitesService {
          AND bull_job_id IS NOT NULL
        ORDER BY created_at DESC
        LIMIT 1`,
-      [`SYNC_GSC:${id}:%`]
+      [`SYNC_GSC-${id}-%`]
     );
     if (inFlight.rowCount) return { statusCode: 202, jobId: inFlight.rows[0]!.bull_job_id, siteId: id };
 
@@ -422,6 +520,7 @@ function toPublicSite(row: SiteRow): Record<string, unknown> {
     polylangStatus: row.polylang_status,
     languages: normalizeSiteLanguages(row.polylang_languages),
     publishLanguages: Array.isArray(row.publish_languages) ? row.publish_languages : [],
+    pagesSyncedAt: row.pages_synced_at ?? null,
     gscStatus: row.gsc_status,
     contentCount: Number(row.content_count),
     publishedCount: Number(row.published_count),
@@ -467,6 +566,23 @@ class SitesController {
   @Roles("ADMIN")
   testRankMath(@Param("id") id: string, @Req() request: AuthenticatedRequest): Promise<{ id: string; status: string; message: string }> {
     return this.sites.testRankMath(id, request.user?.id);
+  }
+
+  @Get(":id/pages")
+  listPages(@Param("id") id: string, @Query() query: { kind?: string; search?: string; hidden?: string }): Promise<Record<string, unknown>> {
+    return this.sites.listPages(id, query);
+  }
+
+  @Patch(":id/pages/:pageId")
+  @Roles("ADMIN")
+  updatePage(@Param("id") id: string, @Param("pageId") pageId: string, @Body() body: UpdateSitePageDto, @Req() request: AuthenticatedRequest): Promise<{ ok: true }> {
+    return this.sites.updatePage(id, pageId, body, request.user?.id);
+  }
+
+  @Post(":id/sync-pages")
+  @Roles("ADMIN")
+  syncPages(@Param("id") id: string, @Req() request: AuthenticatedRequest): Promise<{ statusCode: 202; jobId: string; siteId: string }> {
+    return this.sites.syncPages(id, request.user?.id);
   }
 
   @Post(":id/sync-languages")

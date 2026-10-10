@@ -43,6 +43,91 @@ export interface WordPressSearchResult {
   subtype?: string | null;
 }
 
+export interface WordPressPageRow {
+  wpType: string;
+  wpId: string;
+  url: string;
+  title: string;
+  slug: string;
+  summary: string;
+  language: string | null;
+  modifiedAt: string | null;
+}
+
+const ignoredPostTypes = new Set(["attachment", "nav_menu_item", "wp_block", "wp_template", "wp_template_part", "wp_navigation", "wp_global_styles", "wp_font_family", "wp_font_face", "revision"]);
+const pagesPerRequest = 100;
+const maxPagesPerType = 10;
+
+export function decodeEntities(value: string): string {
+  const named: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", hellip: "…", ndash: "–", mdash: "—", laquo: "«", raquo: "»" };
+  return value.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (full, entity: string) => {
+    if (entity[0] === "#") {
+      const code = entity[1]?.toLowerCase() === "x" ? parseInt(entity.slice(2), 16) : parseInt(entity.slice(1), 10);
+      return Number.isFinite(code) && code > 0 && code < 0x110000 ? String.fromCodePoint(code) : full;
+    }
+    return named[entity.toLowerCase()] ?? full;
+  });
+}
+
+export function plainText(value: unknown): string {
+  return decodeEntities(String(value ?? "").replace(/<[^>]*>/g, " ")).replace(/\s+/g, " ").trim();
+}
+
+/** Every public page, post and custom type (services, products...) of the site, as the REST API lists them. */
+export async function fetchSitePages(site: WordPressSite): Promise<WordPressPageRow[]> {
+  const base = safeBaseUrl(site.wordpress_url);
+  const auth = authHeader(site);
+  const get = (url: URL) => safeFetch(url, { headers: { Authorization: auth, Accept: "application/json" }, signal: AbortSignal.timeout(60_000) });
+
+  const restBases: Array<{ type: string; restBase: string }> = [];
+  try {
+    const typesResponse = await get(new URL("/wp-json/wp/v2/types", base));
+    if (typesResponse.ok) {
+      const types = (await typesResponse.json()) as Record<string, { slug?: string; rest_base?: string }>;
+      for (const [slug, info] of Object.entries(types)) {
+        if (!ignoredPostTypes.has(slug) && info.rest_base) restBases.push({ type: info.slug ?? slug, restBase: info.rest_base });
+      }
+    }
+  } catch {
+    // Fall back to the two core types below.
+  }
+  if (restBases.length === 0) restBases.push({ type: "post", restBase: "posts" }, { type: "page", restBase: "pages" });
+
+  const rows: WordPressPageRow[] = [];
+  for (const { type, restBase } of restBases) {
+    for (let page = 1; page <= maxPagesPerType; page += 1) {
+      const url = new URL(`/wp-json/wp/v2/${restBase}`, base);
+      url.searchParams.set("per_page", String(pagesPerRequest));
+      url.searchParams.set("page", String(page));
+      url.searchParams.set("status", "publish");
+      url.searchParams.set("_fields", "id,link,title,slug,modified_gmt,excerpt,type,lang");
+      const response = await get(url);
+      if (!response.ok) {
+        if (page === 1 && response.status !== 400) throw new Error(`فشل جلب صفحات ${restBase} برمز ${response.status}`);
+        break; // 400 = past the last page
+      }
+      const batch = (await response.json()) as Array<{ id?: number; link?: string; title?: { rendered?: string }; slug?: string; modified_gmt?: string; excerpt?: { rendered?: string }; lang?: unknown }>;
+      if (!Array.isArray(batch)) break;
+      for (const row of batch) {
+        const title = plainText(row.title?.rendered);
+        if (typeof row.id !== "number" || !row.link || !title) continue;
+        rows.push({
+          wpType: type,
+          wpId: String(row.id),
+          url: row.link,
+          title,
+          slug: row.slug ?? "",
+          summary: plainText(row.excerpt?.rendered).slice(0, 240),
+          language: typeof row.lang === "string" && row.lang ? row.lang.toLowerCase() : null,
+          modifiedAt: row.modified_gmt ? `${row.modified_gmt}Z` : null
+        });
+      }
+      if (batch.length < pagesPerRequest) break;
+    }
+  }
+  return rows;
+}
+
 export async function publishPost(site: WordPressSite, input: WordPressPostInput): Promise<WordPressPostResult> {
   validatePost(input);
   const base = safeBaseUrl(site.wordpress_url);

@@ -5,6 +5,7 @@ import { createLogger, workerHeartbeatIntervalMs, workerHeartbeatKey } from "@co
 import { captureException, flushMonitoring, initMonitoring } from "@content-agent/shared/monitoring";
 import { closeDb, markJobCompleted, markJobFailed, markJobProvider, markJobRetrying, markJobStarted, query, setContentFailure } from "./db.js";
 import { processContentOperation, providerForOperationResult, syncGscForSite } from "./processors.js";
+import { sitesNeedingPageSync, syncPagesForSite } from "./pages-sync.js";
 import { hasRetriesLeft } from "./retry.js";
 import { nextAutomatedOperation, shouldAutoContinue, type AutomationState } from "./automation.js";
 
@@ -152,6 +153,11 @@ for (const queueName of queueNames) {
           if (!siteId) throw new Error("لا يوجد siteId في مهمة GSC.");
           await syncGscForSite(siteId);
           await markJobProvider(bullJobId, "google-search-console");
+        } else if (operation === "SYNC_PAGES") {
+          if (!siteId) throw new Error("لا يوجد siteId في مهمة مزامنة الصفحات.");
+          const synced = await syncPagesForSite(siteId);
+          await markJobProvider(bullJobId, "wordpress");
+          jobLog.info("site pages synced", { ...synced });
         } else {
           if (!contentItemId) throw new Error("لا يوجد contentItemId في المهمة.");
           const result = await processContentOperation(contentItemId, operation);
@@ -187,6 +193,27 @@ for (const queueName of queueNames) {
 }
 
 logger.info("worker ready", { queues: [...queueNames] });
+
+/** Keeps every site's page index fresh: once a day per site, checked hourly (and shortly after start). */
+async function schedulePageSyncs(): Promise<void> {
+  try {
+    const day = new Date().toISOString().slice(0, 10);
+    for (const siteId of await sitesNeedingPageSync()) {
+      const jobId = normalizeBullJobId(`SYNC_PAGES-${day}-${siteId}`);
+      try {
+        await queueFor("maintenance").add("SYNC_PAGES", { siteId, operation: "SYNC_PAGES" }, { jobId, attempts: 2, backoff: { type: "exponential", delay: 60_000 }, removeOnComplete: true, removeOnFail: 50 });
+        await query("INSERT INTO job_runs (operation, queue_name, bull_job_id, status) VALUES ('SYNC_PAGES', 'maintenance', $1, 'WAITING') ON CONFLICT DO NOTHING", [jobId]);
+      } catch (error) {
+        logger.warn("could not queue page sync", { siteId, error });
+      }
+    }
+  } catch (error) {
+    logger.warn("page sync scheduling failed", { error });
+  }
+}
+const pageSyncTimer = setInterval(() => void schedulePageSyncs(), 60 * 60 * 1000);
+pageSyncTimer.unref();
+setTimeout(() => void schedulePageSyncs(), 30_000).unref();
 
 async function enqueueNextAutomatedStep(contentItemId: string, finishedOperation: string): Promise<void> {
   const result = await query<AutomationState>("SELECT status, mode, auto_publish FROM content_items WHERE id = $1", [contentItemId]);
@@ -269,6 +296,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   shuttingDown = true;
   logger.info("worker shutting down", { signal });
   clearInterval(heartbeatTimer);
+  clearInterval(pageSyncTimer);
   await Promise.all(workers.map((worker) => worker.close()));
   await Promise.all([...queueClients.values()].map((queue) => queue.close()));
   await connection.quit();

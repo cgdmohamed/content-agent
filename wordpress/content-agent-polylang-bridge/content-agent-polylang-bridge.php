@@ -86,6 +86,18 @@ function content_agent_polylang_register_fields(): void
         return;
     }
 
+    // Every post type Polylang translates (posts, pages, custom types such as services) reports its language,
+    // so Content Agent can build a per-language index of the site's pages.
+    $post_types = array_values(array_filter(
+        get_post_types(['show_in_rest' => true]),
+        static function ($type) {
+            return function_exists('pll_is_translated_post_type') && pll_is_translated_post_type($type);
+        }
+    ));
+    if (!in_array('post', $post_types, true)) {
+        $post_types[] = 'post';
+    }
+
     $lang_schema = [
         'description' => 'Polylang language slug.',
         'type' => 'string',
@@ -98,7 +110,7 @@ function content_agent_polylang_register_fields(): void
         'additionalProperties' => ['type' => 'integer'],
     ];
 
-    register_rest_field('post', 'lang', [
+    register_rest_field($post_types, 'lang', [
         'get_callback' => static function (array $object) {
             return pll_get_post_language((int) $object['id'], 'slug') ?: null;
         },
