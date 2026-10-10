@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildTranslationPrompt, linkHrefs, missingLinks, parseTranslation } from "../translation.js";
-import { polylangLanguageFor } from "../processors.js";
+import { allowedInternalLinkKeys, closingInstruction, linkSearchTerms, polylangLanguageFor } from "../processors.js";
 import { termInLanguage } from "../wordpress.js";
 
 const sourceHtml = `<h2>عنوان</h2><p>${"نص المقال الأصلي ".repeat(30)}</p><p><a href="https://example.com/a">رابط</a> و <a href='https://example.com/b'>آخر</a></p>`;
@@ -79,5 +79,29 @@ describe("Polylang publishing helpers", () => {
     expect(termInLanguage({ lang: "ar" }, "en")).toBe(false);
     expect(termInLanguage({}, "en")).toBe(true);
     expect(termInLanguage({ lang: "ar" }, undefined)).toBe(true);
+  });
+});
+
+describe("internal links and closing", () => {
+  const item = { wordpress_url: "https://example.com", target_keyword: "التسويق بالمحتوى", topic: "التسويق بالمحتوى", title: "دليل التسويق" };
+  const links = [
+    { title: "مقال", url: "https://example.com/post-a/", keyword: null },
+    { title: "الرئيسية", url: "https://example.com/", keyword: null },
+    { title: "بحث", url: "https://example.com/?s=x", keyword: null },
+    { title: "خارجي", url: "https://other.com/a", keyword: null }
+  ];
+
+  it("allows only real candidate pages, never the homepage or a search URL", () => {
+    expect([...allowedInternalLinkKeys(item, links)]).toEqual(["https://example.com/post-a"]);
+    expect(allowedInternalLinkKeys(item, []).size).toBe(0);
+  });
+
+  it("searches the keyword, topic and title once each", () => {
+    expect(linkSearchTerms(item)).toEqual(["التسويق بالمحتوى", "دليل التسويق"]);
+  });
+
+  it("tells the model not to add a generic closing block", () => {
+    expect(closingInstruction).toContain("ممنوع");
+    expect(closingInstruction).toContain("دعوة للتواصل");
   });
 });

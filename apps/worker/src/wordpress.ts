@@ -153,7 +153,7 @@ export async function uploadMedia(site: WordPressSite, input: { bytes: Buffer; m
   return { id: String(data.id), sourceUrl: data.source_url ?? "" };
 }
 
-export async function searchWordPressInternalContent(site: WordPressSite, search: string): Promise<WordPressSearchResult[]> {
+export async function searchWordPressInternalContent(site: WordPressSite, search: string, language?: string): Promise<WordPressSearchResult[]> {
   const term = search.trim();
   if (!term) return [];
   const base = safeBaseUrl(site.wordpress_url);
@@ -165,6 +165,7 @@ export async function searchWordPressInternalContent(site: WordPressSite, search
       endpoint.searchParams.set("search", term);
       endpoint.searchParams.set("per_page", "10");
       endpoint.searchParams.set("subtype", subtype);
+      if (language) endpoint.searchParams.set("lang", language);
       const response = await safeFetch(endpoint, {
         headers: { Authorization: auth, Accept: "application/json" },
         signal: AbortSignal.timeout(30_000)

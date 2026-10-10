@@ -92,6 +92,39 @@ describe.skipIf(!integrationEnabled)("worker pipeline against real PostgreSQL", 
     expect(image.cost).toBeGreaterThan(0);
   });
 
+  it("keeps the article as written: no generic closing, no homepage or search links, only real candidate links", async () => {
+    const siteId = await seedSite({ query });
+    const contentId = await seedContent({ query }, siteId, { status: "DRAFTED" });
+    await query("UPDATE content_items SET title = 'عنوان', target_keyword = 'التسويق بالمحتوى', draft_html = $2 WHERE id = $1", [contentId, `<h2>عنوان</h2><p>${paragraph}</p>`]);
+    // A published article of the same site is a valid internal link target.
+    const other = await seedContent({ query }, siteId, { status: "PUBLISHED", topic: "مقال آخر" });
+    await query("UPDATE content_items SET wordpress_post_url = 'https://203.0.113.10/real-post/', title = 'مقال حقيقي' WHERE id = $1", [other]);
+    const reviewed = JSON.stringify({
+      title: "التسويق بالمحتوى: دليل عملي للشركات",
+      metaDescription: "التسويق بالمحتوى دليل عملي يشرح كيف تبني الشركات استراتيجية محتوى تجلب الزوار والعملاء وتزيد الثقة بالعلامة التجارية.",
+      contentHtml: `<h2>التسويق بالمحتوى</h2><p>${paragraph} <a href="https://203.0.113.10/real-post/">مقال حقيقي</a> و<a href="https://203.0.113.10/">الرئيسية</a> و<a href="https://203.0.113.10/invented-page/">صفحة مخترعة</a>.</p><h2>أسئلة شائعة</h2><p>${paragraph}</p>`,
+      suggestedTags: ["محتوى"],
+      category: "تسويق",
+      imagePrompt: "x",
+      imageAlt: "التسويق بالمحتوى"
+    });
+    mock = mockFetch((call) => (call.url.hostname === "api.anthropic.com" ? anthropicReply(reviewed) : undefined), wordpressResponder());
+
+    await processContentOperation(contentId, "REVIEW_DRAFT");
+
+    const html = String((await query("SELECT draft_html FROM content_items WHERE id = $1", [contentId])).rows[0]!.draft_html);
+    expect(html).toContain('href="https://203.0.113.10/real-post/"');
+    expect(html).not.toContain('href="https://203.0.113.10/"');
+    expect(html).not.toContain("invented-page");
+    expect(html).toContain("صفحة مخترعة"); // the anchor text stays, only the bad link goes
+    expect(html).not.toContain("الخطوة التالية");
+    expect(html).not.toContain("مقالات مرتبطة");
+    expect(html).not.toContain("?s=");
+    // The model is told not to add a generic closing block.
+    const prompt = JSON.stringify(mock.calls.find((call) => call.url.hostname === "api.anthropic.com")!.body);
+    expect(prompt).toContain("ممنوع العناوين والعبارات العامة الجاهزة");
+  });
+
   it("adopts an existing WordPress post instead of creating a duplicate on retry", async () => {
     const siteId = await seedSite({ query });
     const contentId = await seedContent({ query }, siteId, { status: "APPROVED" });

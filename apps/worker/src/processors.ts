@@ -522,7 +522,7 @@ async function writeDraft(contentItemId: string): Promise<OperationResult> {
     `- التزم بلغة الموقع فقط: ${languageName(item.language)}. لا تكتب بالعربية إذا كانت اللغة English.`,
     "- لا يقل المقال عن 1200 كلمة عربية مفيدة، وإن كان الموضوع تنافسيًا اجعله أقرب إلى 1600 كلمة.",
     "- لا تكتب أي نصوص نماذج مثل: الاسم، البريد الإلكتروني، رقم الهاتف، املأ النموذج، أرسل الطلب، أو حقول form.",
-    "- أضف CTA طبيعي في نهاية المقال بدون نموذج، مثل دعوة للتواصل أو طلب استشارة أو قراءة مقال مرتبط.",
+    `- ${closingInstruction}`,
     "- أضف قسم أسئلة شائعة واضح للإجابة على أسئلة المستخدمين AEO.",
     "- أضف فقرة ملخص تنفيذي أو إجابة مباشرة قابلة للظهور في الإجابات التوليدية GEO.",
     "- يجب أن تظهر الكلمة المستهدفة حرفيًا في SEO title وmeta description وأول فقرة وواحد من عناوين H2/H3 ومحتوى المقال.",
@@ -530,7 +530,7 @@ async function writeDraft(contentItemId: string): Promise<OperationResult> {
     "- اجعل imageAlt يحتوي الكلمة المستهدفة حرفيًا.",
     "- أضف رابطين داخليين على الأقل من قائمة الروابط الداخلية المرشحة فقط، وبنص anchor طبيعي داخل الفقرات لا في قائمة منفصلة إلا عند الضرورة.",
     "- ممنوع اختراع أي URL داخلي غير موجود في قائمة الروابط المرشحة. إذا لم تجد رابطًا مناسبًا، لا تضف رابطًا عشوائيًا.",
-    "- إذا كانت القائمة لا تحتوي روابط كافية استخدم رابط الصفحة الرئيسية ورابط بحث داخل الموقع كحل أخير فقط.",
+    "- إذا لم تحتوِ القائمة على رابط مناسب لسياق الفقرة فلا تضف رابطًا داخليًا. لا تربط أبدًا بالصفحة الرئيسية أو بصفحة بحث، ولا تضف قسم «مقالات مرتبطة» لمجرد وجود روابط.",
     "- عند عرض بيانات متعددة في جدول، استخدم HTML table كاملًا فقط: table وthead وtbody وtr وth وtd. ممنوع كتابة أعمدة الجدول كنص متلاصق أو مفصول بمسافات.",
     'أعد JSON فقط بالشكل: {"title":"...","metaDescription":"...","contentHtml":"...","suggestedTags":["..."],"category":"...","imagePrompt":"...","imageAlt":"..."}'
   ].join("\n\n");
@@ -580,7 +580,7 @@ async function reviewDraft(contentItemId: string): Promise<OperationResult> {
     `رابط الموقع الأساسي للروابط الداخلية: ${item.wordpress_url}`,
     `روابط داخلية مرشحة من نفس الموقع: ${JSON.stringify(internalLinks)}`,
     "ركز على نية البحث، الوضوح، إزالة التكرار، تحسين العناوين، الوصف التعريفي، والأسئلة الشائعة.",
-    "ارفع جودة المقال إلى معيار SEO/AEO/GEO: إجابة مباشرة، عمق كاف، قسم أسئلة شائعة، CTA طبيعي، وروابط داخلية من قائمة الروابط المرشحة.",
+    `ارفع جودة المقال إلى معيار SEO/AEO/GEO: إجابة مباشرة، عمق كاف، قسم أسئلة شائعة، وروابط داخلية من قائمة الروابط المرشحة عندما تناسب السياق. ${closingInstruction}`,
     "ممنوع اختراع أي URL داخلي غير موجود في قائمة الروابط المرشحة. احذف الرابط الداخلي غير الموثق بدل استبداله بمسار عشوائي.",
     "تأكد أن الكلمة المستهدفة تظهر حرفيًا في العنوان والوصف وأول فقرة وH2/H3 وALT، مع عنوان لا يتجاوز 60 حرفًا ووصف لا يتجاوز 160 حرفًا.",
     "أي جدول داخل المقال يجب أن يكون HTML table حقيقيًا يحتوي thead/tbody/tr/th/td، ولا تترك بيانات الجدول كنص متلاصق.",
@@ -632,17 +632,17 @@ async function optimizeLinksAndCta(contentItemId: string): Promise<OperationResu
   const internalLinks = await fetchInternalLinkCandidates(item);
   const prompt = [
     languageInstruction(item.language),
-    "حسن المقال التالي فقط من ناحية الروابط الداخلية والـ CTA بدون إعادة كتابة شاملة.",
+    "حسن المقال التالي فقط من ناحية الروابط الداخلية بدون إعادة كتابة شاملة.",
     `اسم الموقع: ${item.site_name}`,
     `رابط الموقع الأساسي: ${item.wordpress_url}`,
     `الكلمة المستهدفة: ${item.target_keyword ?? item.topic}`,
     `روابط داخلية مرشحة من نفس الموقع: ${JSON.stringify(internalLinks)}`,
     "المطلوب:",
-    "- أضف رابطين داخليين على الأقل من قائمة الروابط المرشحة فقط داخل فقرات مناسبة وبـ anchor طبيعي يخدم نية البحث.",
-    "- ممنوع اختراع أي URL داخلي غير موجود في قائمة الروابط المرشحة.",
+    "- أضف رابطًا داخليًا (حتى رابطين) من قائمة الروابط المرشحة فقط، داخل فقرة يخدمها الرابط فعلًا وبـ anchor طبيعي يخدم نية البحث. إن لم يوجد رابط مناسب فلا تضف شيئًا.",
+    "- ممنوع اختراع أي URL داخلي غير موجود في قائمة الروابط المرشحة، وممنوع الربط بالصفحة الرئيسية أو بصفحة بحث.",
     "- لا تضف روابط خارجية جديدة ولا تستخدم روابط خارج نفس الموقع.",
     "- حافظ على أي جدول كبنية HTML صحيحة، وإذا وجدت جدولًا كنص متلاصق فحوّله إلى table منظم.",
-    "- إذا وجدت CTA ضعيفًا أو غير موجود، أضف فقرة CTA طبيعية في موضع مناسب قرب النهاية بدون نموذج أو حقول.",
+    "- لا تضف CTA أو فقرة ختامية جديدة، ولا تغيّر ختام المقال.",
     "- حافظ على نفس لغة المقال، ونفس العنوان العام، ونفس البنية قدر الإمكان.",
     "- لا تحذف الأسئلة الشائعة أو الجداول أو الروابط الموجودة إلا لو كانت خاطئة.",
     item.draft_html,
@@ -727,23 +727,7 @@ function optimizeArticleForRankMath(article: ParsedArticle, item: ContentRecord,
   const keyword = focusKeyword.trim();
   if (!keyword) return article;
   const displayKeyword = item.language === "en" ? titleCaseKeyword(keyword) : keyword;
-  let contentHtml = article.contentHtml;
-  if (!containsPhrase(stripHtml(contentHtml).slice(0, 500), keyword)) {
-    const intro = item.language === "en"
-      ? `<p>${displayKeyword} is the key question this guide answers with practical, up-to-date advice.</p>`
-      : `<p>${displayKeyword} هي النقطة الأساسية التي يجيب عنها هذا الدليل بنصائح عملية وواضحة.</p>`;
-    contentHtml = `${intro}${contentHtml}`;
-  }
-  if (!headingContainsPhrase(contentHtml, keyword)) {
-    const heading = item.language === "en" ? `${displayKeyword}: Key Takeaways` : `${displayKeyword}: أهم النقاط`;
-    contentHtml = contentHtml.replace(/<\/p>/i, `</p><h2>${escapeHtml(heading)}</h2>`);
-  }
-  if (countPhrase(stripHtml(contentHtml), keyword) < 2) {
-    const sentence = item.language === "en"
-      ? `<p>For travellers asking about ${escapeHtml(displayKeyword)}, the safest decision comes from matching current travel advice with your route, timing and comfort level.</p>`
-      : `<p>عند البحث عن ${escapeHtml(displayKeyword)}، يكون القرار الأفضل مبنيًا على مقارنة الاحتياج الفعلي بالخيارات المتاحة.</p>`;
-    contentHtml += sentence;
-  }
+  const contentHtml = article.contentHtml;
   return {
     ...article,
     title: buildSeoTitle(article.title, displayKeyword, item.language),
@@ -769,20 +753,11 @@ function buildMetaDescription(meta: string, keyword: string, language: string): 
   return truncateText(candidate, 160);
 }
 
-function headingContainsPhrase(html: string, keyword: string): boolean {
-  return [...html.matchAll(/<h[2-4][^>]*>([\s\S]*?)<\/h[2-4]>/gi)].some((match) => containsPhrase(stripHtml(match[1] ?? ""), keyword));
-}
 
 function containsPhrase(value: string, phrase: string): boolean {
   return normalizeText(value).includes(normalizeText(phrase));
 }
 
-function countPhrase(value: string, phrase: string): number {
-  const normalized = normalizeText(value);
-  const needle = normalizeText(phrase);
-  if (!needle) return 0;
-  return normalized.split(needle).length - 1;
-}
 
 function normalizeText(value: string): string {
   return value.toLowerCase().replace(/[\u064B-\u065F]/g, "").replace(/[^a-z0-9\u0600-\u06FF]+/g, " ").replace(/\s+/g, " ").trim();
@@ -805,6 +780,24 @@ function truncateText(value: string, max: number): string {
   return value.slice(0, max).replace(/\s+\S*$/, "").trim();
 }
 
+/** The article's ending: a natural close, never a generic "contact us" block bolted on regardless of the topic. */
+export const closingInstruction =
+  "اختم المقال بخاتمة طبيعية تلخّص الفكرة وتخدم موضوعه. لا تضف دعوة لاتخاذ إجراء (CTA) إلا إذا كانت منطقية لهذا الموضوع بالذات، وبصياغة خاصة به. ممنوع العناوين والعبارات العامة الجاهزة مثل «دعوة للتواصل» أو «الخطوة التالية» أو «تواصل معنا الآن».";
+
+/** Search phrases that find related pages: the keyword, the topic and the title, without repeats. */
+export function linkSearchTerms(item: Pick<ContentRecord, "target_keyword" | "topic" | "title">): string[] {
+  const seen = new Set<string>();
+  return [item.target_keyword, item.topic, item.title]
+    .map((value) => String(value ?? "").trim())
+    .filter((value) => {
+      const key = value.toLowerCase();
+      if (!value || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 3);
+}
+
 async function fetchInternalLinkCandidates(item: ContentRecord): Promise<InternalLinkCandidate[]> {
   const result = await query<{ title: string | null; topic: string; target_keyword: string | null; wordpress_post_url: string | null }>(
     `SELECT title, topic, target_keyword, wordpress_post_url
@@ -813,12 +806,13 @@ async function fetchInternalLinkCandidates(item: ContentRecord): Promise<Interna
        AND id <> $2
        AND wordpress_post_url IS NOT NULL
        AND status IN ('PUBLISHED', 'SCHEDULED', 'APPROVED')
+       AND language IS NOT DISTINCT FROM $4
      ORDER BY
        CASE WHEN target_keyword IS NOT NULL AND $3 ILIKE '%' || target_keyword || '%' THEN 0 ELSE 1 END,
        content_score DESC,
        updated_at DESC
      LIMIT 8`,
-    [item.site_id, item.id, item.topic]
+    [item.site_id, item.id, item.topic, item.content_language]
   );
   const savedLinks = result.rows
     .map((row) => ({
@@ -828,60 +822,33 @@ async function fetchInternalLinkCandidates(item: ContentRecord): Promise<Interna
     }))
     .filter((row) => row.title && isInternalUrl(row.url, item.wordpress_url));
 
-  let wordpressLinks: InternalLinkCandidate[] = [];
-  try {
-    const searchTerm = String(item.target_keyword ?? item.topic).trim();
-    const found = await searchWordPressInternalContent(
-      {
-        wordpress_url: item.wordpress_url,
-        wordpress_username: item.wordpress_username,
-        wordpress_application_password_encrypted: item.wordpress_application_password_encrypted
-      },
-      searchTerm
-    );
-    wordpressLinks = found
-      .map((row) => ({
-        title: row.title,
-        url: row.url,
-        keyword: row.subtype === "page" ? "page" : null
-      }))
-      .filter((row) => row.title && isInternalUrl(row.url, item.wordpress_url));
-  } catch {
-    wordpressLinks = [];
+  const wordpressLinks: InternalLinkCandidate[] = [];
+  const site = {
+    wordpress_url: item.wordpress_url,
+    wordpress_username: item.wordpress_username,
+    wordpress_application_password_encrypted: item.wordpress_application_password_encrypted
+  };
+  for (const term of linkSearchTerms(item)) {
+    try {
+      const found = await searchWordPressInternalContent(site, term, polylangLanguageFor(item));
+      for (const row of found) {
+        if (row.title && isInternalUrl(row.url, item.wordpress_url)) wordpressLinks.push({ title: row.title, url: row.url, keyword: row.subtype === "page" ? "page" : null });
+      }
+    } catch {
+      // A failed search only means fewer candidates; the article is still written.
+    }
   }
 
   return uniqueInternalLinks([...savedLinks, ...wordpressLinks], item.wordpress_url).slice(0, 12);
 }
 
+/**
+ * Cleans what the model wrote without adding anything: form-like text is removed and internal links are kept only
+ * when they point at a real candidate page. Nothing is appended — a generic closing or a "related articles" block
+ * made of the homepage and a search URL reads as filler and links nowhere useful.
+ */
 function enforceArticleRequirements(html: string, item: ContentRecord, internalLinks: InternalLinkCandidate[] = []): string {
-  let next = removeFormLikeCopy(html);
-  next = constrainInternalLinks(next, item, internalLinks);
-  if (!hasCta(next, item.language)) {
-    next += buildCtaFallback(item);
-  }
-  if (countAllowedInternalLinks(next, item, internalLinks) < 2) {
-    next += buildInternalLinksFallback(item, internalLinks);
-  }
-  return sanitizeArticleHtml(next);
-}
-
-function buildInternalLinksFallback(item: ContentRecord, internalLinks: InternalLinkCandidate[]): string {
-  const links = uniqueInternalLinks(internalLinks, item.wordpress_url).slice(0, 2);
-  const baseUrl = normalizeBaseUrl(item.wordpress_url);
-  if (links.length < 2) {
-    const keyword = encodeURIComponent(String(item.target_keyword ?? item.topic).trim());
-    links.push({ title: item.language === "en" ? "Visit the homepage" : "زيارة الصفحة الرئيسية", url: baseUrl, keyword: null });
-    links.push({ title: item.language === "en" ? "Explore related articles" : "استكشاف مقالات مرتبطة", url: `${baseUrl}?s=${keyword}`, keyword: null });
-  }
-  const heading = item.language === "en" ? "Related Articles" : "مقالات مرتبطة";
-  return `<h2>${heading}</h2><ul>${links.slice(0, 2).map((link) => `<li><a href="${escapeHtml(link.url)}">${escapeHtml(link.title)}</a></li>`).join("")}</ul>`;
-}
-
-function buildCtaFallback(item: ContentRecord): string {
-  if (item.language === "en") {
-    return `<h2>Next Steps</h2><p>If you are comparing your options and want a clearer decision, review your priorities and contact ${escapeHtml(item.site_name)} for guidance tailored to your trip.</p>`;
-  }
-  return `<h2>الخطوة التالية</h2><p>إذا كنت تقارن الخيارات وتريد قرارًا أدق، راجع احتياجاتك الفعلية وابدأ بتطبيق التوصيات المناسبة، أو تواصل مع فريق ${escapeHtml(item.site_name)} للحصول على توجيه يناسب حالتك.</p>`;
+  return sanitizeArticleHtml(constrainInternalLinks(removeFormLikeCopy(html), item, internalLinks));
 }
 
 function uniqueInternalLinks(links: InternalLinkCandidate[], siteUrl: string): InternalLinkCandidate[] {
@@ -896,28 +863,28 @@ function uniqueInternalLinks(links: InternalLinkCandidate[], siteUrl: string): I
 
 function constrainInternalLinks(html: string, item: ContentRecord, internalLinks: InternalLinkCandidate[]): string {
   const allowed = allowedInternalLinkKeys(item, internalLinks);
-  if (!allowed.size) return html;
   return html.replace(/<a\b([^>]*)href=["']([^"']+)["']([^>]*)>([\s\S]*?)<\/a>/gi, (full, _before, href, _after, label) => {
     if (!isInternalUrl(String(href), item.wordpress_url)) return full;
     return allowed.has(normalizeUrlKey(String(href))) ? full : stripHtml(String(label));
   });
 }
 
-function countAllowedInternalLinks(html: string, item: Pick<ContentRecord, "wordpress_url" | "target_keyword" | "topic">, internalLinks: InternalLinkCandidate[]): number {
-  const allowed = allowedInternalLinkKeys(item, internalLinks);
-  if (!allowed.size) return 0;
-  return [...html.matchAll(/<a\s+[^>]*href=["']([^"']+)["']/gi)].filter((match) => {
-    const href = String(match[1] ?? "");
-    return isInternalUrl(href, item.wordpress_url) && allowed.has(normalizeUrlKey(href));
-  }).length;
+/** Internal links an article may keep: the candidate pages only (never the homepage or a search URL). */
+export function allowedInternalLinkKeys(item: Pick<ContentRecord, "wordpress_url">, internalLinks: InternalLinkCandidate[]): Set<string> {
+  const homepage = normalizeUrlKey(item.wordpress_url);
+  return new Set(
+    uniqueInternalLinks(internalLinks, item.wordpress_url)
+      .map((link) => normalizeUrlKey(link.url))
+      .filter((key) => key && key !== homepage && !isSearchUrl(key))
+  );
 }
 
-function allowedInternalLinkKeys(item: Pick<ContentRecord, "wordpress_url" | "target_keyword" | "topic">, internalLinks: InternalLinkCandidate[]): Set<string> {
-  const links = uniqueInternalLinks(internalLinks, item.wordpress_url).map((link) => link.url);
-  const baseUrl = normalizeBaseUrl(item.wordpress_url);
-  const keyword = encodeURIComponent(String(item.target_keyword ?? item.topic).trim());
-  links.push(baseUrl, `${baseUrl}?s=${keyword}`);
-  return new Set(links.map(normalizeUrlKey).filter(Boolean));
+function isSearchUrl(url: string): boolean {
+  try {
+    return new URL(url).searchParams.has("s");
+  } catch {
+    return false;
+  }
 }
 
 function removeFormLikeCopy(html: string): string {
@@ -925,13 +892,6 @@ function removeFormLikeCopy(html: string): string {
     .replace(/<form[\s\S]*?<\/form>/gi, "")
     .replace(/<(input|textarea|select|button)\b[\s\S]*?>/gi, "")
     .replace(/<p>\s*(?:الاسم|اسمك|البريد الإلكتروني|رقم الهاتف|املأ النموذج|أرسل الطلب|اضغط إرسال)\s*<\/p>/gi, "");
-}
-
-function hasCta(html: string, language = "ar"): boolean {
-  const text = html.replace(/<[^>]+>/g, " ");
-  const arabicCta = /تواصل|احجز|ابدأ|اطلب|استشر|راسل|الخطوة التالية|اتصل/i;
-  const englishCta = /contact|book|start|request|quote|speak|plan your|next steps|call|email|whatsapp/i;
-  return language === "en" ? englishCta.test(text) : arabicCta.test(text) || englishCta.test(text);
 }
 
 function isInternalUrl(url: string, siteUrl: string): boolean {
@@ -1023,17 +983,6 @@ function safeHost(url: string): string | null {
   }
 }
 
-function normalizeBaseUrl(value: string): string {
-  try {
-    const url = new URL(value);
-    url.pathname = "/";
-    url.search = "";
-    url.hash = "";
-    return url.toString();
-  } catch {
-    return value;
-  }
-}
 
 function slugFromKeyword(value: string): string {
   return value
@@ -1047,9 +996,6 @@ function slugFromKeyword(value: string): string {
     .replace(/-$/g, "") || "article";
 }
 
-function escapeHtml(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
 
 function defaultWritingStandard(): string {
   return [
