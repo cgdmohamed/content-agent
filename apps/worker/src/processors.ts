@@ -528,6 +528,7 @@ async function writeDraft(contentItemId: string): Promise<OperationResult> {
     "- يجب أن تظهر الكلمة المستهدفة حرفيًا في SEO title وmeta description وأول فقرة وواحد من عناوين H2/H3 ومحتوى المقال.",
     "- اجعل العنوان 55-60 حرفًا تقريبًا، والوصف التعريفي 140-160 حرفًا، وابدأ العنوان بالكلمة المستهدفة قدر الإمكان.",
     "- اجعل imageAlt يحتوي الكلمة المستهدفة حرفيًا.",
+    "- اجعل العنوان والوصف فريدين ويعكسان محتوى هذا المقال تحديدًا؛ ممنوع القوالب العامة الجاهزة مثل «دليل عملي» أو «نصائح عملية وخطوات واضحة».",
     "- أضف رابطين داخليين على الأقل من قائمة الروابط الداخلية المرشحة فقط، وبنص anchor طبيعي داخل الفقرات لا في قائمة منفصلة إلا عند الضرورة.",
     "- ممنوع اختراع أي URL داخلي غير موجود في قائمة الروابط المرشحة. إذا لم تجد رابطًا مناسبًا، لا تضف رابطًا عشوائيًا.",
     "- إذا لم تحتوِ القائمة على رابط مناسب لسياق الفقرة فلا تضف رابطًا داخليًا. لا تربط أبدًا بالصفحة الرئيسية أو بصفحة بحث، ولا تضف قسم «مقالات مرتبطة» لمجرد وجود روابط.",
@@ -583,6 +584,7 @@ async function reviewDraft(contentItemId: string): Promise<OperationResult> {
     `ارفع جودة المقال إلى معيار SEO/AEO/GEO: إجابة مباشرة، عمق كاف، قسم أسئلة شائعة، وروابط داخلية من قائمة الروابط المرشحة عندما تناسب السياق. ${closingInstruction}`,
     "ممنوع اختراع أي URL داخلي غير موجود في قائمة الروابط المرشحة. احذف الرابط الداخلي غير الموثق بدل استبداله بمسار عشوائي.",
     "تأكد أن الكلمة المستهدفة تظهر حرفيًا في العنوان والوصف وأول فقرة وH2/H3 وALT، مع عنوان لا يتجاوز 60 حرفًا ووصف لا يتجاوز 160 حرفًا.",
+    "العنوان والوصف يجب أن يعكسا محتوى هذا المقال تحديدًا، بلا قوالب عامة جاهزة مثل «دليل عملي» أو «نصائح عملية وخطوات واضحة».",
     "أي جدول داخل المقال يجب أن يكون HTML table حقيقيًا يحتوي thead/tbody/tr/th/td، ولا تترك بيانات الجدول كنص متلاصق.",
     "احذف أي نصوص تبدو كحقول نموذج أو placeholders مثل الاسم والبريد ورقم الهاتف واملأ النموذج.",
     `لا يقل الناتج النهائي عن 1200 كلمة إذا كان المقال أقصر من ذلك، وبنفس لغة الموقع فقط: ${languageName(item.language)}.`,
@@ -723,36 +725,33 @@ function parseArticle(value: string): {
 
 type ParsedArticle = ReturnType<typeof parseArticle>;
 
-function optimizeArticleForRankMath(article: ParsedArticle, item: ContentRecord, focusKeyword: string): ParsedArticle {
-  const keyword = focusKeyword.trim();
-  if (!keyword) return article;
-  const displayKeyword = item.language === "en" ? titleCaseKeyword(keyword) : keyword;
-  const contentHtml = article.contentHtml;
+/**
+ * Keeps the model's title, description and image alt text. Only over-long values are shortened, at a word boundary;
+ * nothing is replaced by a generic template ("keyword: practical guide"), and a missing keyword is left to the
+ * quality score to flag instead of being stuffed in.
+ */
+function optimizeArticleForRankMath(article: ParsedArticle, _item: ContentRecord, focusKeyword: string): ParsedArticle {
   return {
     ...article,
-    title: buildSeoTitle(article.title, displayKeyword, item.language),
-    metaDescription: buildMetaDescription(article.metaDescription, displayKeyword, item.language),
-    contentHtml: sanitizeArticleHtml(contentHtml),
-    imageAlt: containsPhrase(article.imageAlt, keyword) ? article.imageAlt : displayKeyword
+    title: fitText(article.title, maxSeoTitleLength),
+    metaDescription: fitText(article.metaDescription, maxMetaDescriptionLength),
+    contentHtml: sanitizeArticleHtml(article.contentHtml),
+    imageAlt: article.imageAlt.trim() || focusKeyword.trim()
   };
 }
 
-function buildSeoTitle(title: string, keyword: string, language: string): string {
-  if (containsPhrase(title, keyword) && title.length <= 60) return title;
-  const suffix = language === "en" ? "Practical Guide" : "دليل عملي";
-  const candidate = `${keyword}: ${suffix}`;
-  if (candidate.length <= 60) return candidate;
-  return truncateText(keyword, 60);
-}
+export const maxSeoTitleLength = 60;
+export const maxMetaDescriptionLength = 160;
 
-function buildMetaDescription(meta: string, keyword: string, language: string): string {
-  if (containsPhrase(meta, keyword) && meta.length >= 120 && meta.length <= 160) return meta;
-  const candidate = language === "en"
-    ? `${keyword}: practical tips, costs, safety notes and next steps to help you plan with confidence.`
-    : `${keyword}: نصائح عملية وخطوات واضحة تساعدك على المقارنة واتخاذ قرار مناسب بثقة.`;
-  return truncateText(candidate, 160);
+/** Shortens `value` to at most `max` characters, cutting at a word boundary and dropping dangling punctuation. */
+export function fitText(value: string, max: number): string {
+  const text = value.replace(/\s+/g, " ").trim();
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max);
+  const boundary = cut.lastIndexOf(" ");
+  const words = boundary >= max * 0.6 ? cut.slice(0, boundary) : cut;
+  return words.replace(/[\s,;:،؛\-–—|/]+$/u, "").trim();
 }
-
 
 function containsPhrase(value: string, phrase: string): boolean {
   return normalizeText(value).includes(normalizeText(phrase));
@@ -767,18 +766,7 @@ function stripHtml(value: string): string {
   return value.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
 
-function titleCaseKeyword(value: string): string {
-  const small = new Set(["a", "an", "and", "as", "at", "for", "from", "in", "of", "on", "or", "the", "to", "with"]);
-  return value
-    .split(/\s+/)
-    .map((word, index) => (index > 0 && small.has(word.toLowerCase()) ? word.toLowerCase() : word.charAt(0).toUpperCase() + word.slice(1)))
-    .join(" ");
-}
 
-function truncateText(value: string, max: number): string {
-  if (value.length <= max) return value;
-  return value.slice(0, max).replace(/\s+\S*$/, "").trim();
-}
 
 /** The article's ending: a natural close, never a generic "contact us" block bolted on regardless of the topic. */
 export const closingInstruction =

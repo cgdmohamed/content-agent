@@ -100,8 +100,8 @@ describe.skipIf(!integrationEnabled)("worker pipeline against real PostgreSQL", 
     const other = await seedContent({ query }, siteId, { status: "PUBLISHED", topic: "مقال آخر" });
     await query("UPDATE content_items SET wordpress_post_url = 'https://203.0.113.10/real-post/', title = 'مقال حقيقي' WHERE id = $1", [other]);
     const reviewed = JSON.stringify({
-      title: "التسويق بالمحتوى: دليل عملي للشركات",
-      metaDescription: "التسويق بالمحتوى دليل عملي يشرح كيف تبني الشركات استراتيجية محتوى تجلب الزوار والعملاء وتزيد الثقة بالعلامة التجارية.",
+      title: "كيف تجذب الشركات الناشئة عملاءها بالمحتوى",
+      metaDescription: "شرح مبسط لخطوات بناء خطة محتوى تجذب الزوار وتحوّلهم إلى عملاء للشركات الناشئة.",
       contentHtml: `<h2>التسويق بالمحتوى</h2><p>${paragraph} <a href="https://203.0.113.10/real-post/">مقال حقيقي</a> و<a href="https://203.0.113.10/">الرئيسية</a> و<a href="https://203.0.113.10/invented-page/">صفحة مخترعة</a>.</p><h2>أسئلة شائعة</h2><p>${paragraph}</p>`,
       suggestedTags: ["محتوى"],
       category: "تسويق",
@@ -120,6 +120,11 @@ describe.skipIf(!integrationEnabled)("worker pipeline against real PostgreSQL", 
     expect(html).not.toContain("الخطوة التالية");
     expect(html).not.toContain("مقالات مرتبطة");
     expect(html).not.toContain("?s=");
+    // The model's title and description are kept, not replaced by a "keyword: practical guide" template.
+    expect((await query("SELECT title, meta_description FROM content_items WHERE id = $1", [contentId])).rows[0]).toEqual({
+      title: "كيف تجذب الشركات الناشئة عملاءها بالمحتوى",
+      meta_description: "شرح مبسط لخطوات بناء خطة محتوى تجذب الزوار وتحوّلهم إلى عملاء للشركات الناشئة."
+    });
     // The model is told not to add a generic closing block.
     const prompt = JSON.stringify(mock.calls.find((call) => call.url.hostname === "api.anthropic.com")!.body);
     expect(prompt).toContain("ممنوع العناوين والعبارات العامة الجاهزة");

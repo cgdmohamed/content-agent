@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildTranslationPrompt, linkHrefs, missingLinks, parseTranslation } from "../translation.js";
-import { allowedInternalLinkKeys, closingInstruction, linkSearchTerms, polylangLanguageFor } from "../processors.js";
+import { allowedInternalLinkKeys, closingInstruction, fitText, maxSeoTitleLength, linkSearchTerms, polylangLanguageFor } from "../processors.js";
 import { termInLanguage } from "../wordpress.js";
 
 const sourceHtml = `<h2>عنوان</h2><p>${"نص المقال الأصلي ".repeat(30)}</p><p><a href="https://example.com/a">رابط</a> و <a href='https://example.com/b'>آخر</a></p>`;
@@ -103,5 +103,20 @@ describe("internal links and closing", () => {
   it("tells the model not to add a generic closing block", () => {
     expect(closingInstruction).toContain("ممنوع");
     expect(closingInstruction).toContain("دعوة للتواصل");
+  });
+});
+
+describe("title and description limits", () => {
+  it("leaves values within the limit untouched", () => {
+    expect(fitText("  عنوان   مناسب  ", 60)).toBe("عنوان مناسب");
+  });
+
+  it("shortens long values at a word boundary without leftovers", () => {
+    const title = "كيف تختار أفضل أدوات التسويق بالمحتوى للشركات الناشئة في السعودية هذا العام";
+    const fitted = fitText(title, maxSeoTitleLength);
+    expect(fitted.length).toBeLessThanOrEqual(maxSeoTitleLength);
+    expect(title.startsWith(fitted)).toBe(true);
+    expect(title[fitted.length]).toBe(" ");
+    expect(fitText("one two three, four five six", 14)).toBe("one two three");
   });
 });
