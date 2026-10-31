@@ -39,6 +39,7 @@ require_once CC_INC . 'ui-service.php';
 require_once CC_INC . 'forms.php';
 require_once CC_INC . 'seo.php';
 require_once CC_INC . 'seed.php';
+require_once CC_INC . 'importer.php';
 
 /* ============================================================
    THEME SETUP

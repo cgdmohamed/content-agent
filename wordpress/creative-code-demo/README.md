@@ -43,6 +43,15 @@ Native handler `admin-post.php?action=cc_lead`: honeypot, same-origin referer ch
 ### SEO
 Meta description, canonical, Open Graph and JSON-LD (Organization/WebSite/Breadcrumb/Service/FAQ/BlogPosting) are printed **only when no SEO plugin is active**. With Rank Math the theme leaves SEO to it and keeps the schema extras from the old theme (`inc/legacy.php`).
 
+## Content importer / exporter
+Appearance → **استيراد وتصدير المحتوى**. *Export* downloads all services, case studies, packages, testimonials, pages, posts and theme settings as one JSON file (version 1). *Import* works in three safe steps:
+
+1. **Dry run** — upload/paste JSON; nothing is written. A table lists every item as create / update / unchanged with before → after per field.
+2. **Apply** — new items are created as **drafts** (unless the file says otherwise); existing items are matched by `type + slug` and only the fields present in the file change. Nothing is ever deleted.
+3. **Rollback** — each apply stores a snapshot (last 5); one click restores updated items and moves created ones to the trash.
+
+Guards: admin-only + nonces, JSON ≤ 2 MB / 500 items, whitelisted post types, meta keys (`service_*`, `package_*`, `project_*`, `client_*`, `lp_*`, `pkg_*`, `rating`, `cc_faq_items`) and taxonomies, `wp_kses_post` on content, no remote URL/image fetching. Unknown fields are reported and ignored.
+
 ## Differences from the static demo
 - Placeholder sections (testimonials, case-study metrics/gallery/quote) are not shown until real content exists. Case-study results come from the project's «ملخص النتائج» (one `label|value` per line).
 - Demo copy for About / process / values / sectors / markets is in the templates; edit the PHP or override with a child theme.
